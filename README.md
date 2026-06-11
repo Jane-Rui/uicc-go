@@ -46,11 +46,11 @@ at                           AT +CSIM APDU reader
 ccid                         PC/SC CCID APDU reader
 cdcwdm                       Linux cdc-wdm connection primitive
 mbim                         MBIM protocol, proxy/direct dialers, UICC access
-qcom                     Shared QCOM QMI/QMUX constants and transport contracts
-qcom/qmi                 QMI/QMUX transport, proxy/direct dialers
-qcom/qrtr                QRTR transport for QMI services
-qcom/tlv                 QCOM QMI TLV types, codecs, constructors, and lookup helpers
-qcom/uim                 QMI UIM primitives
+qcom                         Shared QCOM QMI/QMUX constants and transport contracts
+qcom/qmi                     QMI/QMUX transport, proxy/direct dialers
+qcom/qrtr                    QRTR transport for QMI services
+qcom/tlv                     QCOM QMI TLV types, codecs, constructors, and lookup helpers
+qcom/uim                     QMI UIM primitives
 usim                         USIM/ISIM card loading and high-level operations
 usim/card                    Card-facing interfaces consumed by usim
 usim/command                 APDU command helpers used by usim

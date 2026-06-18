@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	slotPollInterval = 500 * time.Millisecond
+	slotReadyTimeout = 5 * time.Second
+)
+
 func (r *Reader) ensureSlotActivated(ctx context.Context) error {
 	slot, err := r.currentActivatedSlot(ctx)
 	if err != nil {

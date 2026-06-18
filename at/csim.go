@@ -17,6 +17,15 @@ func (c CSIMCommand) MarshalText() ([]byte, error) {
 
 type CSIMResponse []byte
 
+func (r CSIMResponse) MarshalBinary() ([]byte, error) {
+	return append([]byte(nil), r...), nil
+}
+
+func (r *CSIMResponse) UnmarshalBinary(data []byte) error {
+	*r = append((*r)[:0], data...)
+	return nil
+}
+
 func (r CSIMResponse) MarshalText() ([]byte, error) {
 	hexData := strings.ToUpper(hex.EncodeToString(r))
 	return fmt.Appendf(nil, "%d,%q", len(hexData), hexData), nil

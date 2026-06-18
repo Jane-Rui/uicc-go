@@ -7,6 +7,8 @@ import (
 	"slices"
 )
 
+var masterFilePath = []byte{0x3F, 0x00}
+
 func (r *Reader) FileAttributes(ctx context.Context, file FileRef) (FileAttributes, error) {
 	if len(file.Path) == 0 {
 		return FileAttributes{}, errors.New("reading MBIM file attributes: path is empty")

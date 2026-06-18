@@ -1,9 +1,14 @@
 package uim
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/damonto/uicc-go/qcom"
+	"github.com/damonto/uicc-go/qcom/tlv"
 )
 
 const maxAuthenticateFieldLength = 255
@@ -59,4 +64,38 @@ func (r *AuthenticateRequest) UnmarshalBinary(data []byte) error {
 	}
 	r.AUTN = slices.Clone(body)
 	return nil
+}
+
+func (r *Reader) Authenticate(ctx context.Context, req AuthenticateRequest) ([]byte, error) {
+	response, err := r.authenticateResponse(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	value, ok := tlv.Value(response.TLVs, 0x11)
+	if !ok {
+		return nil, errors.New("authenticating QMI UIM: authenticate result TLV missing")
+	}
+	return decodeLengthPrefixedBytes(value)
+}
+
+func (r *Reader) authenticateResponse(
+	ctx context.Context,
+	req AuthenticateRequest,
+) (qcom.Response, error) {
+	value, err := req.MarshalBinary()
+	if err != nil {
+		return qcom.Response{}, err
+	}
+
+	resp, err := r.request(ctx, qcom.MessageAuthenticate, tlv.TLVs{
+		tlv.Bytes(0x01, putSessionValue(req.Session, req.AID)),
+		tlv.Bytes(0x02, value),
+	})
+	if err != nil {
+		return qcom.Response{}, err
+	}
+	if err := cardResultOK(resp); err != nil {
+		return qcom.Response{}, err
+	}
+	return resp, nil
 }

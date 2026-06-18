@@ -6,20 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/qcom/tlv"
 )
-
-type RawFileAttributes struct {
-	FileSize    uint16
-	FileID      uint16
-	FileType    QMIFileType
-	RecordSize  uint16
-	RecordCount uint16
-	Raw         []byte
-}
 
 type SlotStatus struct {
 	ActiveSlot uint8
@@ -174,30 +164,6 @@ func (s CardStatus) Ready() bool {
 		}
 	}
 	return false
-}
-
-func decodeFileAttributes(data []byte) (RawFileAttributes, error) {
-	if len(data) < 9 {
-		return RawFileAttributes{}, errors.New("reading file attributes: attributes payload is truncated")
-	}
-
-	attrs := RawFileAttributes{
-		FileSize:    binary.LittleEndian.Uint16(data[:2]),
-		FileID:      binary.LittleEndian.Uint16(data[2:4]),
-		FileType:    QMIFileType(data[4]),
-		RecordSize:  binary.LittleEndian.Uint16(data[5:7]),
-		RecordCount: binary.LittleEndian.Uint16(data[7:9]),
-	}
-	if len(data) < 26 {
-		return attrs, nil
-	}
-
-	rawLength := int(binary.LittleEndian.Uint16(data[24:26]))
-	if len(data) < 26+rawLength {
-		return RawFileAttributes{}, errors.New("reading file attributes: raw data is truncated")
-	}
-	attrs.Raw = slices.Clone(data[26 : 26+rawLength])
-	return attrs, nil
 }
 
 type payloadReader struct {

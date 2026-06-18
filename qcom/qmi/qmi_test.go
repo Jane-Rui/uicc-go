@@ -167,23 +167,3 @@ func TestOpenConfiguresProxy(t *testing.T) {
 		})
 	}
 }
-
-func TestOpenOptionsSetDialer(t *testing.T) {
-	tests := []struct {
-		name string
-		opts []Option
-		want Dialer
-	}{
-		{"proxy", []Option{WithProxy("/dev/cdc-wdm0")}, ProxyDialer{Device: "/dev/cdc-wdm0"}},
-		{"direct", []Option{WithDirect("/dev/cdc-wdm0")}, DirectDialer{Device: "/dev/cdc-wdm0"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := newConfig(tt.opts)
-			if cfg.dialer != tt.want {
-				t.Fatalf("dialer = %#v, want %#v", cfg.dialer, tt.want)
-			}
-		})
-	}
-}

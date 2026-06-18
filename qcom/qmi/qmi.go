@@ -62,18 +62,10 @@ func WithDirect(device string) Option {
 }
 
 func Open(ctx context.Context, opts ...Option) (*Transport, error) {
-	return openWithConfig(ctx, newConfig(opts))
-}
-
-func newConfig(opts []Option) config {
 	cfg := config{}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	return cfg
-}
-
-func openWithConfig(ctx context.Context, cfg config) (*Transport, error) {
 	if cfg.dialer == nil {
 		return nil, errors.New("opening QMI transport: dialer is nil")
 	}

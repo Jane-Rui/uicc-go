@@ -10,7 +10,13 @@ import (
 	"github.com/damonto/uicc-go/qcom/tlv"
 )
 
-func (r *Reader) activateSlot(ctx context.Context) error {
+const (
+	slotReadyTimeout  = 5 * time.Second
+	slotPollInterval  = 500 * time.Millisecond
+	slotStatusTimeout = 1 * time.Second
+)
+
+func (r *Reader) ActivateSlot(ctx context.Context) error {
 	status, err := r.SlotStatus(ctx)
 	if err != nil {
 		if errors.Is(err, qcom.QMIErrorNotSupported) {
@@ -90,4 +96,8 @@ func (r *Reader) CardStatus(ctx context.Context) (CardStatus, error) {
 		return CardStatus{}, err
 	}
 	return decodeCardStatus(resp)
+}
+
+func (r *Reader) Slot() uint8 {
+	return r.slot
 }

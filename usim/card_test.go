@@ -151,6 +151,59 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
+func TestMNCFromIMSI(t *testing.T) {
+	tests := []struct {
+		name      string
+		imsi      string
+		mncLength int
+		want      string
+		wantErr   bool
+	}{
+		{
+			name:      "two digit MNC",
+			imsi:      "001010123456789",
+			mncLength: 2,
+			want:      "01",
+		},
+		{
+			name:      "three digit MNC",
+			imsi:      "001001123456789",
+			mncLength: 3,
+			want:      "001",
+		},
+		{
+			name:      "IMSI too short",
+			imsi:      "0010",
+			mncLength: 2,
+			wantErr:   true,
+		},
+		{
+			name:      "unsupported MNC length",
+			imsi:      "001010123456789",
+			mncLength: 1,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := mncFromIMSI(tt.imsi, tt.mncLength)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("mncFromIMSI() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("mncFromIMSI() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("mncFromIMSI() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCardAKA(t *testing.T) {
 	aid := []byte{0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02}
 	rand := bytes.Repeat([]byte{0x01}, 16)
@@ -366,6 +419,12 @@ func TestNewSkipsUnavailableISIM(t *testing.T) {
 			}
 			if got := card.IMSI(); got != "001010123456789" {
 				t.Fatalf("IMSI() = %q, want %q", got, "001010123456789")
+			}
+			if got := card.MNC(); got != "01" {
+				t.Fatalf("MNC() = %q, want %q", got, "01")
+			}
+			if got := card.MNCLength(); got != 2 {
+				t.Fatalf("MNCLength() = %d, want %d", got, 2)
 			}
 			if got := card.PrivateIdentity(); got != "" {
 				t.Fatalf("PrivateIdentity() = %q, want empty", got)

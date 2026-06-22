@@ -166,7 +166,7 @@ func (u *Card) load(ctx context.Context) error {
 	rootApp := command.App{Reader: u.tx}
 	usimApp := command.App{Reader: u.tx, AID: u.aid}
 
-	iccidData, err := rootApp.Transparent(ctx, fileEFICCID, "reading EF_ICCID")
+	iccidData, err := rootApp.Transparent(ctx, fileEFICCID)
 	if err != nil {
 		return fmt.Errorf("loading ICCID: %w", err)
 	}
@@ -176,7 +176,7 @@ func (u *Card) load(ctx context.Context) error {
 	}
 	u.iccid = iccid.String()
 
-	imsiData, err := usimApp.Transparent(ctx, fileEFIMSI, "reading EF_IMSI")
+	imsiData, err := usimApp.Transparent(ctx, fileEFIMSI)
 	if err != nil {
 		return fmt.Errorf("loading IMSI: %w", err)
 	}
@@ -184,7 +184,7 @@ func (u *Card) load(ctx context.Context) error {
 	if err := imsi.UnmarshalBinary(imsiData); err != nil {
 		return fmt.Errorf("loading IMSI: %w", err)
 	}
-	adData, err := usimApp.Transparent(ctx, fileEFAD, "reading EF_AD")
+	adData, err := usimApp.Transparent(ctx, fileEFAD)
 	if err != nil {
 		return fmt.Errorf("loading EF_AD: %w", err)
 	}
@@ -192,7 +192,7 @@ func (u *Card) load(ctx context.Context) error {
 	if err := ad.UnmarshalBinary(adData); err != nil {
 		return fmt.Errorf("loading EF_AD: %w", err)
 	}
-	mnc, err := formatMNC(imsi.Digits, ad.MNCLength)
+	mnc, err := mncFromIMSI(imsi.Digits, ad.MNCLength)
 	if err != nil {
 		return fmt.Errorf("loading IMSI: %w", err)
 	}
@@ -201,19 +201,19 @@ func (u *Card) load(ctx context.Context) error {
 	u.mnc = mnc
 	u.mncLength = ad.MNCLength
 
-	if gid1, err := usimApp.Transparent(ctx, fileEFGID1, "reading EF_GID1"); err == nil {
+	if gid1, err := usimApp.Transparent(ctx, fileEFGID1); err == nil {
 		u.gid1 = strings.ToUpper(hex.EncodeToString(gid1))
 	} else {
 		u.logger.Debug("reading EF_GID1 from USIM failed", "err", err)
 	}
 
-	records, err := usimApp.LinearFixed(ctx, fileEFSMSP, "reading EF_SMSP")
+	records, err := usimApp.LinearFixed(ctx, fileEFSMSP)
 	if err == nil {
 		if smsc, err := firstSMSC(records); err == nil {
 			u.serviceCenter.Address = smsc.String()
 		}
 	}
-	if psi, err := usimApp.FirstText(ctx, pathEFPSISMSC, "reading EFPSISMSC"); err == nil {
+	if psi, err := usimApp.FirstText(ctx, pathEFPSISMSC); err == nil {
 		u.serviceCenter.PSI = psi.String()
 	} else {
 		u.logger.Debug("reading EFPSISMSC from USIM failed", "err", err)
@@ -251,24 +251,24 @@ func (u *Card) loadISIM(ctx context.Context) error {
 
 	u.logger.Debug("found ISIM AID", "aid", fmt.Sprintf("%X", aid))
 	u.isimAID = aid
-	impi, err := isimApp.Text(ctx, fileEFIMPI, "reading EF_IMPI")
+	impi, err := isimApp.Text(ctx, fileEFIMPI)
 	if err != nil {
 		return fmt.Errorf("reading EF_IMPI: %w", err)
 	}
 	privateIdentity := impi.String()
 	var homeDomain string
-	if domain, err := isimApp.Text(ctx, fileEFDomain, "reading EF_DOMAIN"); err == nil {
+	if domain, err := isimApp.Text(ctx, fileEFDomain); err == nil {
 		homeDomain = domain.String()
 	} else {
 		u.logger.Debug("reading EF_DOMAIN failed", "err", err)
 	}
-	impu, err := isimApp.FirstText(ctx, fileEFIMPU, "reading EF_IMPU")
+	impu, err := isimApp.FirstText(ctx, fileEFIMPU)
 	if err != nil {
 		return fmt.Errorf("reading EF_IMPU: %w", err)
 	}
 	publicIdentity := impu.String()
 	serviceCenter := u.serviceCenter
-	if psi, err := isimApp.FirstText(ctx, pathEFPSISMSC, "reading EFPSISMSC"); err == nil {
+	if psi, err := isimApp.FirstText(ctx, pathEFPSISMSC); err == nil {
 		serviceCenter.PSI = psi.String()
 	} else {
 		u.logger.Debug("reading EFPSISMSC from ISIM failed", "err", err)
@@ -306,15 +306,13 @@ func firstSMSC(records [][]byte) (simfile.SMSC, error) {
 	return "", errors.New("reading EF_SMSP: SMSC not found")
 }
 
-func formatMNC(imsi string, mncLength int) (string, error) {
+func mncFromIMSI(imsi string, mncLength int) (string, error) {
 	if len(imsi) < 3+mncLength {
-		return "", errors.New("IMSI is too short for MNC length")
+		return "", errors.New("IMSI too short for MNC length")
 	}
 	switch mncLength {
-	case 2:
-		return "0" + imsi[3:5], nil
-	case 3:
-		return imsi[3:6], nil
+	case 2, 3:
+		return imsi[3 : 3+mncLength], nil
 	default:
 		return "", fmt.Errorf("unsupported MNC length %d", mncLength)
 	}

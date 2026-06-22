@@ -93,8 +93,8 @@ func (r *Reader) OpenChannel(ctx context.Context, aid []byte) (uint32, error) {
 	if err := request.Request().Transmit(ctx, r.conn); err != nil {
 		return 0, fmt.Errorf("opening MBIM UICC channel: %w", err)
 	}
-	if err := uiccStatusError("opening MBIM UICC channel", request.Response.Status); err != nil {
-		return 0, err
+	if err := uiccStatusError(request.Response.Status); err != nil {
+		return 0, fmt.Errorf("opening MBIM UICC channel: %w", err)
 	}
 	return request.Response.Channel, nil
 }
@@ -202,7 +202,10 @@ func (r *Reader) CloseChannel(ctx context.Context, channel uint32) error {
 	if err := request.Request().Transmit(ctx, r.conn); err != nil {
 		return fmt.Errorf("closing MBIM UICC channel: %w", err)
 	}
-	return uiccStatusError("closing MBIM UICC channel", request.Response.Status)
+	if err := uiccStatusError(request.Response.Status); err != nil {
+		return fmt.Errorf("closing MBIM UICC channel: %w", err)
+	}
+	return nil
 }
 
 func (r *Reader) STKEnvelope(ctx context.Context, data []byte) error {
@@ -234,11 +237,11 @@ func cloneByteSlices(values [][]byte) [][]byte {
 	return clones
 }
 
-func uiccStatusError(action string, status uint32) error {
+func uiccStatusError(status uint32) error {
 	if uiccStatusOK(status) {
 		return nil
 	}
-	return fmt.Errorf("%s: %w", action, apdu.StatusError{SW: uiccStatusCode(status)})
+	return apdu.StatusError{SW: uiccStatusCode(status)}
 }
 
 func uiccStatusOK(status uint32) bool {

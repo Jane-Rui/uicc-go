@@ -43,9 +43,9 @@ func (c FindAID) Run(ctx context.Context, r usimcard.Reader) ([]byte, error) {
 	return nil, errors.New("application not found")
 }
 
-func (a App) Transparent(ctx context.Context, path []byte, action string) ([]byte, error) {
+func (a App) Transparent(ctx context.Context, path []byte) ([]byte, error) {
 	file := a.file(path)
-	attrs, err := a.fileStructure(ctx, file, action, simfile.StructureTransparent)
+	attrs, err := a.fileStructure(ctx, file, simfile.StructureTransparent)
 	if err != nil {
 		return nil, err
 	}
@@ -55,32 +55,32 @@ func (a App) Transparent(ctx context.Context, path []byte, action string) ([]byt
 		Length: attrs.FileSize,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading transparent file %X: %w", path, err)
 	}
 	return slices.Clone(data), nil
 }
 
-func (a App) Text(ctx context.Context, path []byte, action string) (simfile.Text, error) {
-	data, err := a.Transparent(ctx, path, action)
+func (a App) Text(ctx context.Context, path []byte) (simfile.Text, error) {
+	data, err := a.Transparent(ctx, path)
 	if err != nil {
 		return "", err
 	}
 
 	var text simfile.Text
 	if err := text.UnmarshalBinary(data); err != nil {
-		return "", err
+		return "", fmt.Errorf("reading text file %X: %w", path, err)
 	}
 	return text, nil
 }
 
-func (a App) LinearFixed(ctx context.Context, path []byte, action string) ([][]byte, error) {
+func (a App) LinearFixed(ctx context.Context, path []byte) ([][]byte, error) {
 	file := a.file(path)
-	attrs, err := a.fileStructure(ctx, file, action, simfile.StructureLinearFixed)
+	attrs, err := a.fileStructure(ctx, file, simfile.StructureLinearFixed)
 	if err != nil {
 		return nil, err
 	}
 	if attrs.RecordCount == 0 {
-		return nil, fmt.Errorf("%s: file has no records", action)
+		return nil, fmt.Errorf("reading linear fixed file %X: file has no records", path)
 	}
 
 	records := make([][]byte, 0, attrs.RecordCount)
@@ -91,21 +91,21 @@ func (a App) LinearFixed(ctx context.Context, path []byte, action string) ([][]b
 			Length: attrs.RecordSize,
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reading linear fixed file %X record %d: %w", path, recordID, err)
 		}
 		records = append(records, slices.Clone(record))
 	}
 	return records, nil
 }
 
-func (a App) FirstText(ctx context.Context, path []byte, action string) (simfile.Text, error) {
+func (a App) FirstText(ctx context.Context, path []byte) (simfile.Text, error) {
 	file := a.file(path)
-	attrs, err := a.fileStructure(ctx, file, action, simfile.StructureLinearFixed)
+	attrs, err := a.fileStructure(ctx, file, simfile.StructureLinearFixed)
 	if err != nil {
 		return "", err
 	}
 	if attrs.RecordCount == 0 {
-		return "", fmt.Errorf("%s: file has no records", action)
+		return "", fmt.Errorf("reading text records from file %X: file has no records", path)
 	}
 
 	for recordID := uint16(1); recordID <= attrs.RecordCount; recordID++ {
@@ -115,7 +115,7 @@ func (a App) FirstText(ctx context.Context, path []byte, action string) (simfile
 			Length: attrs.RecordSize,
 		})
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("reading text record %d from file %X: %w", recordID, path, err)
 		}
 
 		var value simfile.Text
@@ -126,7 +126,7 @@ func (a App) FirstText(ctx context.Context, path []byte, action string) (simfile
 			return value, nil
 		}
 	}
-	return "", fmt.Errorf("%s: no populated record", action)
+	return "", fmt.Errorf("reading text records from file %X: no populated record", path)
 }
 
 func (a App) file(path []byte) usimcard.FileRef {
@@ -136,13 +136,13 @@ func (a App) file(path []byte) usimcard.FileRef {
 	}
 }
 
-func (a App) fileStructure(ctx context.Context, file usimcard.FileRef, action string, want simfile.FileStructure) (usimcard.FileAttributes, error) {
+func (a App) fileStructure(ctx context.Context, file usimcard.FileRef, want simfile.FileStructure) (usimcard.FileAttributes, error) {
 	attrs, err := a.Reader.FileAttributes(ctx, file)
 	if err != nil {
-		return usimcard.FileAttributes{}, err
+		return usimcard.FileAttributes{}, fmt.Errorf("reading file %X attributes: %w", file.Path, err)
 	}
 	if attrs.FileStructure != want {
-		return usimcard.FileAttributes{}, fmt.Errorf("%s: unexpected file structure", action)
+		return usimcard.FileAttributes{}, fmt.Errorf("reading file %X attributes: structure %X, want %X", file.Path, attrs.FileStructure, want)
 	}
 	return attrs, nil
 }

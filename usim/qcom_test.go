@@ -96,8 +96,11 @@ func TestNewWithFakeQMITransport(t *testing.T) {
 				if got := card.IMSI(); got != "001010123456789" {
 					t.Fatalf("IMSI() = %q", got)
 				}
-				if got := card.MNC(); got != "001" {
+				if got := card.MNC(); got != "01" {
 					t.Fatalf("MNC() = %q", got)
+				}
+				if got := card.MNCLength(); got != 2 {
+					t.Fatalf("MNCLength() = %d", got)
 				}
 				if got := card.SMSC(); got != "" {
 					t.Fatalf("SMSC() = %q, want empty", got)

@@ -13,8 +13,8 @@ func (id ICCID) String() string {
 }
 
 func (id ICCID) MarshalBinary() ([]byte, error) {
-	if err := validateDigits("marshaling ICCID", string(id), 1); err != nil {
-		return nil, err
+	if err := validateDigits(string(id), 1); err != nil {
+		return nil, fmt.Errorf("marshaling ICCID: %w", err)
 	}
 	return encodeSwappedBCD(string(id))
 }
@@ -24,8 +24,8 @@ func (id *ICCID) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("parsing EF_ICCID: %w", err)
 	}
-	if err := validateDigits("parsing EF_ICCID", digits, 1); err != nil {
-		return err
+	if err := validateDigits(digits, 1); err != nil {
+		return fmt.Errorf("parsing EF_ICCID: %w", err)
 	}
 
 	*id = ICCID(digits)
@@ -33,16 +33,16 @@ func (id *ICCID) UnmarshalBinary(data []byte) error {
 }
 
 func (id ICCID) MarshalText() ([]byte, error) {
-	if err := validateDigits("marshaling ICCID", string(id), 1); err != nil {
-		return nil, err
+	if err := validateDigits(string(id), 1); err != nil {
+		return nil, fmt.Errorf("marshaling ICCID: %w", err)
 	}
 	return []byte(string(id)), nil
 }
 
 func (id *ICCID) UnmarshalText(text []byte) error {
 	digits := string(text)
-	if err := validateDigits("parsing ICCID", digits, 1); err != nil {
-		return err
+	if err := validateDigits(digits, 1); err != nil {
+		return fmt.Errorf("parsing ICCID: %w", err)
 	}
 
 	*id = ICCID(digits)
@@ -59,8 +59,8 @@ func (imsi IMSI) String() string {
 }
 
 func (imsi IMSI) MarshalBinary() ([]byte, error) {
-	if err := validateDigits("marshaling IMSI", imsi.Digits, 6); err != nil {
-		return nil, err
+	if err := validateDigits(imsi.Digits, 6); err != nil {
+		return nil, fmt.Errorf("marshaling IMSI: %w", err)
 	}
 
 	body, err := encodeSwappedBCD("9" + imsi.Digits)
@@ -90,22 +90,28 @@ func (imsi *IMSI) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("reading EF_IMSI: %w", err)
 	}
-	return imsi.setDigits(digits, "reading EF_IMSI")
+	if err := imsi.setDigits(digits); err != nil {
+		return fmt.Errorf("reading EF_IMSI: %w", err)
+	}
+	return nil
 }
 
 func (imsi IMSI) MarshalText() ([]byte, error) {
-	if err := validateDigits("marshaling IMSI", imsi.Digits, 6); err != nil {
-		return nil, err
+	if err := validateDigits(imsi.Digits, 6); err != nil {
+		return nil, fmt.Errorf("marshaling IMSI: %w", err)
 	}
 	return []byte(imsi.Digits), nil
 }
 
 func (imsi *IMSI) UnmarshalText(text []byte) error {
-	return imsi.setDigits(string(text), "parsing IMSI")
+	if err := imsi.setDigits(string(text)); err != nil {
+		return fmt.Errorf("parsing IMSI: %w", err)
+	}
+	return nil
 }
 
-func (imsi *IMSI) setDigits(digits, action string) error {
-	if err := validateDigits(action, digits, 6); err != nil {
+func (imsi *IMSI) setDigits(digits string) error {
+	if err := validateDigits(digits, 6); err != nil {
 		return err
 	}
 
@@ -116,12 +122,12 @@ func (imsi *IMSI) setDigits(digits, action string) error {
 	return nil
 }
 
-func validateDigits(action, value string, minLength int) error {
+func validateDigits(value string, minLength int) error {
 	if len(value) < minLength {
-		return fmt.Errorf("%s: value is too short", action)
+		return errors.New("value is too short")
 	}
 	if strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-		return fmt.Errorf("%s: value contains non-decimal digits", action)
+		return errors.New("value contains non-decimal digits")
 	}
 	return nil
 }

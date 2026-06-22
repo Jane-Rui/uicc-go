@@ -232,7 +232,7 @@ func TestAppReaders(t *testing.T) {
 				}, AID: usimAID}
 
 				want := []byte{0x98, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0}
-				got, err := app.Transparent(context.Background(), []byte{0x2F, 0xE2}, "reading EF_ICCID")
+				got, err := app.Transparent(context.Background(), []byte{0x2F, 0xE2})
 				if err != nil {
 					t.Fatalf("Transparent() error = %v", err)
 				}
@@ -263,7 +263,7 @@ func TestAppReaders(t *testing.T) {
 					},
 				}, AID: isimAID}
 
-				got, err := app.FirstText(context.Background(), []byte{0x6F, 0x04}, "reading EF_IMPU")
+				got, err := app.FirstText(context.Background(), []byte{0x6F, 0x04})
 				if err != nil {
 					t.Fatalf("FirstText() error = %v", err)
 				}
@@ -292,7 +292,7 @@ func TestAppReaders(t *testing.T) {
 					},
 				}, AID: isimAID}
 
-				got, err := app.FirstText(context.Background(), []byte{0x6F, 0x04}, "reading EF_IMPU")
+				got, err := app.FirstText(context.Background(), []byte{0x6F, 0x04})
 				if err != nil {
 					t.Fatalf("FirstText() error = %v", err)
 				}
@@ -317,7 +317,7 @@ func TestAppReaders(t *testing.T) {
 					},
 				}, AID: isimAID}
 
-				got, err := app.LinearFixed(context.Background(), []byte{0x6F, 0x04}, "reading EF_IMPU")
+				got, err := app.LinearFixed(context.Background(), []byte{0x6F, 0x04})
 				if err != nil {
 					t.Fatalf("LinearFixed() error = %v", err)
 				}
@@ -341,7 +341,7 @@ func TestAppReaders(t *testing.T) {
 					},
 				}, AID: isimAID}
 
-				_, err := app.FirstText(context.Background(), []byte{0x6F, 0x04}, "reading EF_IMPU")
+				_, err := app.FirstText(context.Background(), []byte{0x6F, 0x04})
 				if err == nil {
 					t.Fatal("FirstText() error = nil, want non-nil")
 				}
@@ -368,7 +368,7 @@ func TestAppReaders(t *testing.T) {
 					},
 				}, AID: usimAID}
 
-				got, err := app.FirstText(context.Background(), []byte{0x7F, 0x10, 0x6F, 0xE5}, "reading EFPSISMSC")
+				got, err := app.FirstText(context.Background(), []byte{0x7F, 0x10, 0x6F, 0xE5})
 				if err != nil {
 					t.Fatalf("FirstText() error = %v", err)
 				}

@@ -8,14 +8,14 @@ type AKAResult struct {
 	Reject bool
 }
 
-func (r AKAResult) IsSuccess() bool {
+func (r AKAResult) Successful() bool {
 	return len(r.RES) != 0 && len(r.CK) != 0 && len(r.IK) != 0
 }
 
-func (r AKAResult) IsSynchronizationFailure() bool {
+func (r AKAResult) SynchronizationFailed() bool {
 	return len(r.AUTS) != 0
 }
 
-func (r AKAResult) IsAuthenticationReject() bool {
+func (r AKAResult) AuthenticationRejected() bool {
 	return r.Reject
 }

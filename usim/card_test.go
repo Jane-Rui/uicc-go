@@ -233,7 +233,7 @@ func TestCardAKA(t *testing.T) {
 			body: append([]byte{0xDC, byte(len(auts))}, auts...),
 			check: func(t *testing.T, got AKAResult) {
 				t.Helper()
-				if !got.IsSynchronizationFailure() {
+				if !got.SynchronizationFailed() {
 					t.Fatalf("AKA() = %+v, want synchronization failure", got)
 				}
 				if !bytes.Equal(got.AUTS, auts) {
@@ -246,7 +246,7 @@ func TestCardAKA(t *testing.T) {
 			body: []byte{0xDC, 0x00},
 			check: func(t *testing.T, got AKAResult) {
 				t.Helper()
-				if !got.IsAuthenticationReject() {
+				if !got.AuthenticationRejected() {
 					t.Fatalf("AKA() = %+v, want authentication reject", got)
 				}
 			},

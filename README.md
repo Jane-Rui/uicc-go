@@ -309,11 +309,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-card, err := usim.New(ctx, reader)
-if err != nil {
-	log.Fatal(err)
-}
-defer card.Close()
+	card, err := usim.New(ctx, reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer card.Close()
 
 	log.Printf("ICCID=%s IMSI=%s MCC=%s MNC=%s", card.ICCID(), card.IMSI(), card.MCC(), card.MNC())
 }

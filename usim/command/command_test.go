@@ -143,7 +143,7 @@ func TestAuthenticate3GResultBinary(t *testing.T) {
 				if err := got.UnmarshalBinary(akaSyncFailure); err != nil {
 					t.Fatalf("UnmarshalBinary() error = %v", err)
 				}
-				if !got.IsSynchronizationFailure() || !bytes.Equal(got.AUTS, auts) {
+				if !got.SynchronizationFailed() || !bytes.Equal(got.AUTS, auts) {
 					t.Fatalf("UnmarshalBinary() = %+v", got)
 				}
 				encoded, err := got.MarshalBinary()
@@ -162,7 +162,7 @@ func TestAuthenticate3GResultBinary(t *testing.T) {
 				if err := got.UnmarshalBinary([]byte{0xDC, 0x00}); err != nil {
 					t.Fatalf("UnmarshalBinary() error = %v", err)
 				}
-				if !got.IsAuthenticationReject() {
+				if !got.AuthenticationRejected() {
 					t.Fatalf("UnmarshalBinary() = %+v, want reject", got)
 				}
 				encoded, err := got.MarshalBinary()

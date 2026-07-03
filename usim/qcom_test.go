@@ -165,7 +165,7 @@ func TestAKAWithFakeQMITransport(t *testing.T) {
 			},
 			check: func(t *testing.T, got usim.AKAResult) {
 				t.Helper()
-				if !got.IsSuccess() {
+				if !got.Successful() {
 					t.Fatalf("AKA() = %+v, want success", got)
 				}
 			},
@@ -175,7 +175,7 @@ func TestAKAWithFakeQMITransport(t *testing.T) {
 			body: append([]byte{0xDC, 0x0E}, bytes.Repeat([]byte{0xAA}, 14)...),
 			check: func(t *testing.T, got usim.AKAResult) {
 				t.Helper()
-				if !got.IsSynchronizationFailure() {
+				if !got.SynchronizationFailed() {
 					t.Fatalf("AKA() = %+v, want sync failure", got)
 				}
 			},
@@ -185,7 +185,7 @@ func TestAKAWithFakeQMITransport(t *testing.T) {
 			body: []byte{0xDC, 0x00},
 			check: func(t *testing.T, got usim.AKAResult) {
 				t.Helper()
-				if !got.IsAuthenticationReject() {
+				if !got.AuthenticationRejected() {
 					t.Fatalf("AKA() = %+v, want reject", got)
 				}
 			},

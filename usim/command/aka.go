@@ -21,15 +21,15 @@ type Authenticate3GResult struct {
 	Reject bool
 }
 
-func (r Authenticate3GResult) IsSuccess() bool {
+func (r Authenticate3GResult) Successful() bool {
 	return len(r.RES) != 0 && len(r.CK) != 0 && len(r.IK) != 0
 }
 
-func (r Authenticate3GResult) IsSynchronizationFailure() bool {
+func (r Authenticate3GResult) SynchronizationFailed() bool {
 	return len(r.AUTS) != 0
 }
 
-func (r Authenticate3GResult) IsAuthenticationReject() bool {
+func (r Authenticate3GResult) AuthenticationRejected() bool {
 	return r.Reject
 }
 
@@ -52,7 +52,7 @@ func (c Authenticate3G) MarshalBinary() ([]byte, error) {
 func (r Authenticate3GResult) MarshalBinary() ([]byte, error) {
 	switch {
 	case len(r.RES) != 0 || len(r.CK) != 0 || len(r.IK) != 0:
-		if !r.IsSuccess() {
+		if !r.Successful() {
 			return nil, errors.New("marshaling AKA response: incomplete success result")
 		}
 		out := []byte{0xDB}

@@ -12,8 +12,11 @@ import (
 )
 
 func (r *Reader) SendEnvelope(ctx context.Context, envelope []byte) (EnvelopeResponse, error) {
-	if len(envelope) > 0xFFFF {
-		return EnvelopeResponse{}, fmt.Errorf("running QMI CAT envelope: envelope length %d exceeds QMI CAT limit", len(envelope))
+	if len(envelope) < 2 {
+		return EnvelopeResponse{}, fmt.Errorf("running QMI CAT envelope: envelope length %d is too short", len(envelope))
+	}
+	if len(envelope) > catRawEnvelopeMaxLength {
+		return EnvelopeResponse{}, fmt.Errorf("running QMI CAT envelope: envelope length %d exceeds QMI CAT raw envelope limit %d", len(envelope), catRawEnvelopeMaxLength)
 	}
 
 	service, clientID, err := r.catClient(ctx)
@@ -24,9 +27,9 @@ func (r *Reader) SendEnvelope(ctx context.Context, envelope []byte) (EnvelopeRes
 	value := binary.LittleEndian.AppendUint16(nil, envelopeCommandSMSPP)
 	value = binary.LittleEndian.AppendUint16(value, uint16(len(envelope)))
 	value = append(value, envelope...)
-	tlvs := tlv.TLVs{tlv.Bytes(0x01, value)}
-	if service == qcom.ServiceCAT2 {
-		tlvs = append(tlvs, tlv.Uint(0x10, r.slot))
+	tlvs := tlv.TLVs{
+		tlv.Bytes(0x01, value),
+		tlv.Uint(0x10, r.slot),
 	}
 	resp, err := r.requestService(ctx, service, clientID, qcom.MessageSendEnvelope, tlvs)
 	if err != nil {
@@ -38,7 +41,7 @@ func (r *Reader) SendEnvelope(ctx context.Context, envelope []byte) (EnvelopeRes
 
 	result, ok := tlv.Value(resp.TLVs, 0x10)
 	if !ok {
-		return EnvelopeResponse{SW1: 0x90, SW2: 0x00}, nil
+		return EnvelopeResponse{}, errors.New("running QMI CAT envelope: raw response TLV missing")
 	}
 	if len(result) < 3 {
 		return EnvelopeResponse{}, errors.New("running QMI CAT envelope: raw response TLV is truncated")

@@ -113,19 +113,20 @@ func TestNewRejectsWrongServiceBoundTransport(t *testing.T) {
 func TestReaderNextTransactionIDSkipsZero(t *testing.T) {
 	tests := []struct {
 		name    string
-		reader  Reader
+		ctlTxn  uint8
+		txn     uint16
 		service qcom.ServiceType
 		want    []uint16
 	}{
 		{
 			name:    "control wraps after 255",
-			reader:  Reader{ctlTxn: 0xFE},
+			ctlTxn:  0xFE,
 			service: qcom.ServiceControl,
 			want:    []uint16{0xFF, 0x01},
 		},
 		{
 			name:    "service wraps after 65535",
-			reader:  Reader{txn: 0xFFFE},
+			txn:     0xFFFE,
 			service: qcom.ServiceUIM,
 			want:    []uint16{0xFFFF, 0x0001},
 		},
@@ -133,7 +134,7 @@ func TestReaderNextTransactionIDSkipsZero(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := tt.reader
+			reader := Reader{ctlTxn: tt.ctlTxn, txn: tt.txn}
 			for i, want := range tt.want {
 				if got := reader.nextTransactionID(tt.service); got != want {
 					t.Fatalf("nextTransactionID() call %d = %#04x, want %#04x", i+1, got, want)
@@ -159,6 +160,86 @@ func TestSendEnvelopeRejectsServiceBoundTransport(t *testing.T) {
 	}
 	if got := transport.callCount(); got != 0 {
 		t.Fatalf("Do() calls = %d, want 0", got)
+	}
+}
+
+func TestSendEnvelopeRejectsLongEnvelope(t *testing.T) {
+	tests := []struct {
+		name     string
+		envelope []byte
+		wantErr  string
+	}{
+		{
+			name:    "empty",
+			wantErr: "envelope length 0 is too short",
+		},
+		{
+			name:     "one byte",
+			envelope: []byte{0xD1},
+			wantErr:  "envelope length 1 is too short",
+		},
+		{
+			name:     "above raw envelope limit",
+			envelope: bytes.Repeat([]byte{0xD1}, catRawEnvelopeMaxLength+1),
+			wantErr:  "exceeds QMI CAT raw envelope limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{t: t}
+			reader := &Reader{
+				transport: transport,
+				slot:      1,
+			}
+
+			_, err := reader.SendEnvelope(context.Background(), tt.envelope)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("SendEnvelope() error = %v, want text %q", err, tt.wantErr)
+			}
+			if got := transport.callCount(); got != 0 {
+				t.Fatalf("Do() calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestSendEnvelopeRequiresRawResponseTLV(t *testing.T) {
+	tests := []struct {
+		name    string
+		tlvs    tlv.TLVs
+		wantErr string
+	}{
+		{
+			name:    "missing response",
+			wantErr: "raw response TLV missing",
+		},
+		{
+			name:    "truncated response",
+			tlvs:    tlv.TLVs{tlv.Bytes(0x10, []byte{0x90, 0x00})},
+			wantErr: "raw response TLV is truncated",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &Reader{
+				transport: &fakeTransport{
+					t: t,
+					calls: []transportCall{{
+						resp: successResponse(qcom.MessageSendEnvelope, tt.tlvs...),
+					}},
+				},
+				slot:        1,
+				catService:  qcom.ServiceCAT,
+				catClientID: 10,
+			}
+
+			_, err := reader.SendEnvelope(context.Background(), smsPPEnvelope())
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("SendEnvelope() error = %v, want text %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -465,9 +546,7 @@ func TestReaderSMSPPDownloadUsesCATWhenOnlyCATIsExposed(t *testing.T) {
 							0x86, 0x03, 0x91, 0x21, 0x43,
 							0x8B, 0x03, 0x00, 0x7F, 0xF6,
 						})
-						if _, ok := tlv.Value(req.TLVs, 0x10); ok {
-							t.Fatal("CAT envelope request includes slot TLV 0x10, want CAT1 request without slot")
-						}
+						assertTLV(t, req.TLVs, 0x10, []byte{0x01})
 					},
 					resp: successResponse(qcom.MessageSendEnvelope, tlv.Bytes(0x10, []byte{0x90, 0x00, 0x00})),
 				},

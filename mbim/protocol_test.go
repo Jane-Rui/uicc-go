@@ -61,6 +61,53 @@ func TestRequestMarshalBinary(t *testing.T) {
 	}
 }
 
+func TestCommandMarshalBinaryPadsInformationBuffer(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"empty", nil},
+		{"already aligned", []byte{0xAA, 0xBB, 0xCC, 0xDD}},
+		{"needs padding", []byte{0xAA, 0xBB, 0xCC}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &Command{
+				FragmentTotal:   1,
+				FragmentCurrent: 0,
+				Data:            tt.data,
+			}
+			req := &Request{
+				MessageType:   MessageTypeCommand,
+				TransactionID: 1,
+				Command:       cmd,
+			}
+
+			got, err := req.MarshalBinary()
+			if err != nil {
+				t.Fatalf("MarshalBinary() error = %v", err)
+			}
+
+			wantMessageLength := uint32(12 + 36 + align4(len(tt.data)))
+			if gotMessageLength := binary.LittleEndian.Uint32(got[4:8]); gotMessageLength != wantMessageLength {
+				t.Fatalf("MessageLength = %d, want %d", gotMessageLength, wantMessageLength)
+			}
+			if gotInformationBufferLength := binary.LittleEndian.Uint32(got[44:48]); gotInformationBufferLength != uint32(len(tt.data)) {
+				t.Fatalf("InformationBufferLength = %d, want %d", gotInformationBufferLength, len(tt.data))
+			}
+			if gotData := got[48 : 48+len(tt.data)]; !bytes.Equal(gotData, tt.data) {
+				t.Fatalf("InformationBuffer = %X, want %X", gotData, tt.data)
+			}
+			for _, b := range got[48+len(tt.data):] {
+				if b != 0 {
+					t.Fatalf("padding contains %#x, want zero", b)
+				}
+			}
+		})
+	}
+}
+
 func TestSTKEnvelopeRequest(t *testing.T) {
 	req := (&STKEnvelopeRequest{
 		TransactionID: 7,
@@ -228,6 +275,11 @@ func TestUiccATRResponseUnmarshalBinary(t *testing.T) {
 		{
 			name:    "truncated value",
 			data:    mustDecodeHex(t, "03000000080000003B9F"),
+			wantErr: true,
+		},
+		{
+			name:    "zero offset with nonzero size",
+			data:    mustDecodeHex(t, "03000000000000003B9F96"),
 			wantErr: true,
 		},
 	}
@@ -843,6 +895,27 @@ func TestSubscriberReadyStatusResponseUnmarshalBinary(t *testing.T) {
 			data:    mustDecodeHex(t, "01000000000000000000000000000000000000000000000001000000"),
 			wantErr: true,
 		},
+		{
+			name: "zero string offset with nonzero size",
+			data: corruptSubscriberReadyPayload(t, func(data []byte) {
+				binary.LittleEndian.PutUint32(data[4:8], 0)
+			}),
+			wantErr: true,
+		},
+		{
+			name: "odd UTF-16 string size",
+			data: corruptSubscriberReadyPayload(t, func(data []byte) {
+				binary.LittleEndian.PutUint32(data[8:12], 1)
+			}),
+			wantErr: true,
+		},
+		{
+			name: "overlapping string buffers",
+			data: corruptSubscriberReadyPayload(t, func(data []byte) {
+				binary.LittleEndian.PutUint32(data[12:16], binary.LittleEndian.Uint32(data[4:8]))
+			}),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1016,6 +1089,13 @@ func slotMappingsPayload(slot uint32) []byte {
 	data = binary.LittleEndian.AppendUint32(data, 12)
 	data = binary.LittleEndian.AppendUint32(data, 4)
 	data = binary.LittleEndian.AppendUint32(data, slot)
+	return data
+}
+
+func corruptSubscriberReadyPayload(t *testing.T, mutate func([]byte)) []byte {
+	t.Helper()
+	data := subscriberReadyPayload(t, SubscriberReadyStateInitialized, "00101", "8901", ReadyInfoNone, "+1555")
+	mutate(data)
 	return data
 }
 

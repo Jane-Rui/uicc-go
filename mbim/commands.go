@@ -203,36 +203,50 @@ func (r *SubscriberReadyStatusResponse) UnmarshalBinary(data []byte) error {
 		return errors.New("parsing MBIM subscriber ready status: payload is truncated")
 	}
 	r.ReadyState = SubscriberReadyState(binary.LittleEndian.Uint32(data[:4]))
-	subscriberIDOffset := binary.LittleEndian.Uint32(data[4:8])
-	subscriberIDSize := binary.LittleEndian.Uint32(data[8:12])
-	simICCIDOffset := binary.LittleEndian.Uint32(data[12:16])
-	simICCIDSize := binary.LittleEndian.Uint32(data[16:20])
+	subscriberIDRef := valueRef{
+		offset: binary.LittleEndian.Uint32(data[4:8]),
+		size:   binary.LittleEndian.Uint32(data[8:12]),
+	}
+	simICCIDRef := valueRef{
+		offset: binary.LittleEndian.Uint32(data[12:16]),
+		size:   binary.LittleEndian.Uint32(data[16:20]),
+	}
 	r.ReadyInfo = ReadyInfo(binary.LittleEndian.Uint32(data[20:24]))
 	r.TelephoneNumbersCount = binary.LittleEndian.Uint32(data[24:28])
 
+	if r.TelephoneNumbersCount > uint32((len(data)-28)/8) {
+		return errors.New("parsing MBIM subscriber ready status: telephone number table is truncated")
+	}
+	r.TelephoneNumbers = nil
+	if r.TelephoneNumbersCount > 0 {
+		r.TelephoneNumbers = make([]string, r.TelephoneNumbersCount)
+	}
+
+	refs := make([]valueRef, 0, 2+r.TelephoneNumbersCount)
+	refs = append(refs, subscriberIDRef, simICCIDRef)
+	for i := range r.TelephoneNumbersCount {
+		entryOffset := 28 + i*8
+		refs = append(refs, valueRef{
+			offset: binary.LittleEndian.Uint32(data[entryOffset : entryOffset+4]),
+			size:   binary.LittleEndian.Uint32(data[entryOffset+4 : entryOffset+8]),
+		})
+	}
+	if err := validateUTF16Refs(data, refs); err != nil {
+		return fmt.Errorf("parsing MBIM subscriber ready status strings: %w", err)
+	}
+
 	var err error
-	r.SubscriberID, err = utf16StringAt(data, subscriberIDOffset, subscriberIDSize)
+	r.SubscriberID, err = utf16String(data, subscriberIDRef)
 	if err != nil {
 		return fmt.Errorf("parsing MBIM subscriber ready status subscriber ID: %w", err)
 	}
-	r.SIMICCID, err = utf16StringAt(data, simICCIDOffset, simICCIDSize)
+	r.SIMICCID, err = utf16String(data, simICCIDRef)
 	if err != nil {
 		return fmt.Errorf("parsing MBIM subscriber ready status SIM ICCID: %w", err)
 	}
 
-	if r.TelephoneNumbersCount == 0 {
-		r.TelephoneNumbers = nil
-		return nil
-	}
-	if r.TelephoneNumbersCount > uint32((len(data)-28)/8) {
-		return errors.New("parsing MBIM subscriber ready status: telephone number table is truncated")
-	}
-	r.TelephoneNumbers = make([]string, r.TelephoneNumbersCount)
 	for i := range r.TelephoneNumbersCount {
-		entryOffset := 28 + i*8
-		numberOffset := binary.LittleEndian.Uint32(data[entryOffset : entryOffset+4])
-		numberSize := binary.LittleEndian.Uint32(data[entryOffset+4 : entryOffset+8])
-		r.TelephoneNumbers[i], err = utf16StringAt(data, numberOffset, numberSize)
+		r.TelephoneNumbers[i], err = utf16String(data, refs[2+i])
 		if err != nil {
 			return fmt.Errorf("parsing MBIM subscriber ready status telephone number %d: %w", i, err)
 		}
@@ -889,16 +903,60 @@ func uiccRefHeader(offset int, value []byte) []byte {
 	return data
 }
 
-func uiccByteArrayRef(data []byte, fieldOffset uint32) ([]byte, error) {
+type valueRef struct {
+	offset uint32
+	size   uint32
+}
+
+func readOffsetSizeRef(data []byte, fieldOffset uint32) (valueRef, error) {
 	if fieldOffset > uint32(len(data)) || 8 > uint32(len(data))-fieldOffset {
-		return nil, errors.New("reference is truncated")
+		return valueRef{}, errors.New("reference is truncated")
 	}
-	size := binary.LittleEndian.Uint32(data[fieldOffset : fieldOffset+4])
-	offset := binary.LittleEndian.Uint32(data[fieldOffset+4 : fieldOffset+8])
-	if offset > uint32(len(data)) || size > uint32(len(data))-offset {
-		return nil, errors.New("value is truncated")
+	return valueRef{
+		offset: binary.LittleEndian.Uint32(data[fieldOffset : fieldOffset+4]),
+		size:   binary.LittleEndian.Uint32(data[fieldOffset+4 : fieldOffset+8]),
+	}, nil
+}
+
+func readSizeOffsetRef(data []byte, fieldOffset uint32) (valueRef, error) {
+	if fieldOffset > uint32(len(data)) || 8 > uint32(len(data))-fieldOffset {
+		return valueRef{}, errors.New("reference is truncated")
 	}
-	return slices.Clone(data[offset : offset+size]), nil
+	return valueRef{
+		size:   binary.LittleEndian.Uint32(data[fieldOffset : fieldOffset+4]),
+		offset: binary.LittleEndian.Uint32(data[fieldOffset+4 : fieldOffset+8]),
+	}, nil
+}
+
+func (r valueRef) validate(base []byte) error {
+	if r.offset == 0 {
+		if r.size != 0 {
+			return errors.New("reference has zero offset with nonzero size")
+		}
+		return nil
+	}
+	if r.offset > uint32(len(base)) || r.size > uint32(len(base))-r.offset {
+		return errors.New("value is truncated")
+	}
+	return nil
+}
+
+func (r valueRef) bytes(base []byte) []byte {
+	if r.offset == 0 && r.size == 0 {
+		return nil
+	}
+	return slices.Clone(base[r.offset : r.offset+r.size])
+}
+
+func uiccByteArrayRef(data []byte, fieldOffset uint32) ([]byte, error) {
+	ref, err := readSizeOffsetRef(data, fieldOffset)
+	if err != nil {
+		return nil, err
+	}
+	if err := ref.validate(data); err != nil {
+		return nil, err
+	}
+	return ref.bytes(data), nil
 }
 
 func terminalCapabilityData(capabilities [][]byte) []byte {
@@ -943,15 +1001,14 @@ func appendRefs(data []byte, baseOffset int, refs ...[]byte) []byte {
 }
 
 func byteArrayRef(base, data []byte, fieldOffset uint32) ([]byte, error) {
-	if fieldOffset > uint32(len(data)) || 8 > uint32(len(data))-fieldOffset {
-		return nil, errors.New("reference is truncated")
+	ref, err := readOffsetSizeRef(data, fieldOffset)
+	if err != nil {
+		return nil, err
 	}
-	offset := binary.LittleEndian.Uint32(data[fieldOffset : fieldOffset+4])
-	size := binary.LittleEndian.Uint32(data[fieldOffset+4 : fieldOffset+8])
-	if offset > uint32(len(base)) || size > uint32(len(base))-offset {
-		return nil, errors.New("value is truncated")
+	if err := ref.validate(base); err != nil {
+		return nil, err
 	}
-	return slices.Clone(base[offset : offset+size]), nil
+	return ref.bytes(base), nil
 }
 
 func stringRef(base, data []byte, fieldOffset uint32) (string, error) {
@@ -962,14 +1019,36 @@ func stringRef(base, data []byte, fieldOffset uint32) (string, error) {
 	return string(raw), nil
 }
 
-func utf16StringAt(data []byte, offset, size uint32) (string, error) {
-	if size == 0 {
+func validateUTF16Refs(base []byte, refs []valueRef) error {
+	var previousEnd uint32
+	var sawString bool
+	for _, ref := range refs {
+		if err := ref.validate(base); err != nil {
+			return err
+		}
+		if ref.size%2 != 0 {
+			return errors.New("UTF-16 string has odd byte length")
+		}
+		if ref.offset == 0 {
+			continue
+		}
+		if sawString && ref.offset < previousEnd {
+			return errors.New("string buffers overlap or are out of order")
+		}
+		previousEnd = ref.offset + ref.size
+		sawString = true
+	}
+	return nil
+}
+
+func utf16String(data []byte, ref valueRef) (string, error) {
+	if err := ref.validate(data); err != nil {
+		return "", err
+	}
+	if ref.size == 0 {
 		return "", nil
 	}
-	if offset > uint32(len(data)) || size > uint32(len(data))-offset {
-		return "", errors.New("string buffer is truncated")
-	}
-	raw := data[offset : offset+size]
+	raw := data[ref.offset : ref.offset+ref.size]
 	if len(raw)%2 != 0 {
 		return "", errors.New("UTF-16 string has odd byte length")
 	}
@@ -988,8 +1067,4 @@ func utf16Bytes(s string) []byte {
 		buf = binary.LittleEndian.AppendUint16(buf, v)
 	}
 	return buf
-}
-
-func align4(n int) int {
-	return (n + 3) &^ 3
 }

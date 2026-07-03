@@ -270,6 +270,10 @@ func writeFull(w io.Writer, data []byte) (int, error) {
 	return written, nil
 }
 
+func align4(n int) int {
+	return (n + 3) &^ 3
+}
+
 type Command struct {
 	FragmentTotal   uint32
 	FragmentCurrent uint32
@@ -280,14 +284,19 @@ type Command struct {
 }
 
 func (c *Command) MarshalBinary() ([]byte, error) {
-	buf := make([]byte, 0, 36+len(c.Data))
+	dataLength := len(c.Data)
+	paddedDataLength := align4(dataLength)
+	buf := make([]byte, 0, 36+paddedDataLength)
 	buf = binary.LittleEndian.AppendUint32(buf, c.FragmentTotal)
 	buf = binary.LittleEndian.AppendUint32(buf, c.FragmentCurrent)
 	buf = append(buf, c.ServiceID[:]...)
 	buf = binary.LittleEndian.AppendUint32(buf, c.CommandID)
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(c.CommandType))
-	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(c.Data)))
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(dataLength))
 	buf = append(buf, c.Data...)
+	for len(buf) < 36+paddedDataLength {
+		buf = append(buf, 0)
+	}
 	return buf, nil
 }
 

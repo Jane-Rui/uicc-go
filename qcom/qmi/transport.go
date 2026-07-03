@@ -225,9 +225,9 @@ func (t *Transport) readLoop() {
 		}
 		switch wire.MessageType {
 		case qcom.MessageTypeResponse, 0x01:
-			t.deliverResponse(wire.QCOM())
+			t.deliverResponse(wire.qcomResponse())
 		case qcom.MessageTypeIndication:
-			t.deliverIndication(wire.QCOMIndication())
+			t.deliverIndication(wire.qcomIndication())
 		}
 	}
 }
@@ -299,6 +299,10 @@ func MarshalRequest(req qcom.Request) ([]byte, error) {
 }
 
 func marshalRequest(req qcom.Request) ([]byte, error) {
+	if err := validateRequest(req); err != nil {
+		return nil, err
+	}
+
 	payload, err := req.TLVs.MarshalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("marshal QMI TLVs: %w", err)
@@ -349,6 +353,19 @@ func marshalRequest(req qcom.Request) ([]byte, error) {
 		return nil, fmt.Errorf("write QMUX payload: %w", err)
 	}
 	return out.Bytes(), nil
+}
+
+func validateRequest(req qcom.Request) error {
+	if req.Service == qcom.ServiceControl && req.ClientID != 0 {
+		return fmt.Errorf("QMI control client ID %d is not zero", req.ClientID)
+	}
+	if req.TransactionID == 0 {
+		return errors.New("QMI transaction ID is zero")
+	}
+	if req.Service == qcom.ServiceControl && req.TransactionID > 0xFF {
+		return fmt.Errorf("QMI control transaction ID %d exceeds limit 255", req.TransactionID)
+	}
+	return nil
 }
 
 func writeFull(w io.Writer, p []byte) error {

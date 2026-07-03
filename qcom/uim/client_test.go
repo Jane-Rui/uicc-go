@@ -62,6 +62,106 @@ func (t *fakeTransport) callCount() int {
 	return t.idx
 }
 
+type serviceBoundFakeTransport struct {
+	fakeTransport
+	service qcom.ServiceType
+}
+
+func (t *serviceBoundFakeTransport) QMIService() qcom.ServiceType {
+	return t.service
+}
+
+func TestNewSkipsClientAllocationForServiceBoundTransport(t *testing.T) {
+	transport := &serviceBoundFakeTransport{
+		fakeTransport: fakeTransport{t: t},
+		service:       qcom.ServiceUIM,
+	}
+
+	reader, err := New(context.Background(), transport, WithSlot(1))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if reader.clientID != 0 {
+		t.Fatalf("clientID = %d, want 0 for service-bound transport", reader.clientID)
+	}
+	if got := transport.callCount(); got != 0 {
+		t.Fatalf("Do() calls = %d, want 0", got)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := transport.callCount(); got != 0 {
+		t.Fatalf("Do() calls after Close = %d, want 0", got)
+	}
+}
+
+func TestNewRejectsWrongServiceBoundTransport(t *testing.T) {
+	transport := &serviceBoundFakeTransport{
+		fakeTransport: fakeTransport{t: t},
+		service:       qcom.ServiceCAT2,
+	}
+
+	reader, err := New(context.Background(), transport, WithSlot(1))
+	if err == nil {
+		t.Fatal("New() error = nil, want service mismatch")
+	}
+	if reader != nil {
+		t.Fatalf("New() reader = %#v, want nil", reader)
+	}
+}
+
+func TestReaderNextTransactionIDSkipsZero(t *testing.T) {
+	tests := []struct {
+		name    string
+		reader  Reader
+		service qcom.ServiceType
+		want    []uint16
+	}{
+		{
+			name:    "control wraps after 255",
+			reader:  Reader{ctlTxn: 0xFE},
+			service: qcom.ServiceControl,
+			want:    []uint16{0xFF, 0x01},
+		},
+		{
+			name:    "service wraps after 65535",
+			reader:  Reader{txn: 0xFFFE},
+			service: qcom.ServiceUIM,
+			want:    []uint16{0xFFFF, 0x0001},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := tt.reader
+			for i, want := range tt.want {
+				if got := reader.nextTransactionID(tt.service); got != want {
+					t.Fatalf("nextTransactionID() call %d = %#04x, want %#04x", i+1, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestSendEnvelopeRejectsServiceBoundTransport(t *testing.T) {
+	transport := &serviceBoundFakeTransport{
+		fakeTransport: fakeTransport{t: t},
+		service:       qcom.ServiceUIM,
+	}
+	reader := &Reader{
+		transport: transport,
+		slot:      1,
+	}
+
+	_, err := reader.SendEnvelope(context.Background(), smsPPEnvelope())
+	if err == nil || !strings.Contains(err.Error(), "cannot switch to CAT/CAT2") {
+		t.Fatalf("SendEnvelope() error = %v, want service-bound CAT error", err)
+	}
+	if got := transport.callCount(); got != 0 {
+		t.Fatalf("Do() calls = %d, want 0", got)
+	}
+}
+
 func TestReaderUIMMessages(t *testing.T) {
 	isimAID := []byte{0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x04}
 	reader := &Reader{
@@ -218,6 +318,57 @@ func TestReaderAuthenticateUsesISIMContext(t *testing.T) {
 	}
 	if !bytes.Equal(auth, []byte{0xDC, 0x00}) {
 		t.Fatalf("Authenticate() = %X, want DC00", auth)
+	}
+}
+
+func TestReadTransparentRejectsLongResponse(t *testing.T) {
+	reader := &Reader{
+		transport: &fakeTransport{
+			t: t,
+			calls: []transportCall{
+				{
+					resp: errorResponse(
+						qcom.MessageReadTransparent,
+						qcom.QMIErrorInsufficientResources,
+						tlv.Uint(0x15, uint32(1)),
+					),
+				},
+			},
+		},
+		slot:     1,
+		clientID: 7,
+	}
+
+	_, err := reader.ReadTransparent(context.Background(), TransparentRead{
+		File:   File{Session: SessionPrimaryGWProvisioning, Path: []byte{0x3F, 0x00, 0x6F, 0x07}},
+		Length: 9,
+	})
+	if err == nil || !strings.Contains(err.Error(), "long response is not supported") {
+		t.Fatalf("ReadTransparent() error = %v, want long response error", err)
+	}
+}
+
+func TestReadRecordRejectsResponseIndication(t *testing.T) {
+	reader := &Reader{
+		transport: &fakeTransport{
+			t: t,
+			calls: []transportCall{
+				{
+					resp: successResponse(qcom.MessageReadRecord, tlv.Uint(0x13, uint32(7))),
+				},
+			},
+		},
+		slot:     1,
+		clientID: 7,
+	}
+
+	_, err := reader.ReadRecord(context.Background(), RecordRead{
+		File:   File{Session: SessionPrimaryGWProvisioning, Path: []byte{0x3F, 0x00, 0x6F, 0x04}},
+		Record: 1,
+		Length: 32,
+	})
+	if err == nil || !strings.Contains(err.Error(), "response indication is not supported") {
+		t.Fatalf("ReadRecord() error = %v, want indication error", err)
 	}
 }
 
@@ -574,14 +725,14 @@ func successResponse(id qcom.MessageID, tlvs ...tlv.TLV) qcom.Response {
 	}
 }
 
-func errorResponse(id qcom.MessageID, err qcom.QMIError) qcom.Response {
+func errorResponse(id qcom.MessageID, err qcom.QMIError, tlvs ...tlv.TLV) qcom.Response {
 	return qcom.Response{
 		Service:   qcom.ServiceUIM,
 		ClientID:  7,
 		MessageID: id,
-		TLVs: tlv.TLVs{
+		TLVs: append(tlv.TLVs{
 			tlv.Bytes(qmiTLVResult, []byte{0x01, 0x00, byte(err), byte(uint16(err) >> 8)}),
-		},
+		}, tlvs...),
 	}
 }
 

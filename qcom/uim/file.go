@@ -135,7 +135,18 @@ func (r *Reader) transparentResponse(
 	if err != nil {
 		return qcom.Response{}, err
 	}
-	if err := cardResultOK(resp); err != nil {
+	if err := qcom.ResultError(resp.TLVs); err != nil {
+		if errors.Is(err, qcom.QMIErrorInsufficientResources) {
+			if _, ok := tlv.Value(resp.TLVs, 0x15); ok {
+				return qcom.Response{}, errors.New("reading transparent file: long response is not supported")
+			}
+		}
+		return qcom.Response{}, err
+	}
+	if _, ok := tlv.Value(resp.TLVs, 0x12); ok {
+		return qcom.Response{}, errors.New("reading transparent file: response indication is not supported")
+	}
+	if err := cardError(resp.TLVs); err != nil {
 		return qcom.Response{}, err
 	}
 	return resp, nil
@@ -164,7 +175,13 @@ func (r *Reader) recordResponse(
 	if err != nil {
 		return qcom.Response{}, err
 	}
-	if err := cardResultOK(resp); err != nil {
+	if err := qcom.ResultError(resp.TLVs); err != nil {
+		return qcom.Response{}, err
+	}
+	if _, ok := tlv.Value(resp.TLVs, 0x13); ok {
+		return qcom.Response{}, errors.New("reading record file: response indication is not supported")
+	}
+	if err := cardError(resp.TLVs); err != nil {
 		return qcom.Response{}, err
 	}
 	return resp, nil

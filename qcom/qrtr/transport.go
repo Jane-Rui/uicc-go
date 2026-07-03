@@ -35,7 +35,8 @@ func (r Request) MarshalBinary() ([]byte, error) {
 }
 
 type Transport struct {
-	conn packetConn
+	conn    packetConn
+	service qcom.ServiceType
 
 	writeMu  sync.Mutex
 	readOnce sync.Once
@@ -48,11 +49,20 @@ type Transport struct {
 }
 
 func New(conn packetConn) *Transport {
+	return newTransport(conn, qcom.ServiceUIM)
+}
+
+func newTransport(conn packetConn, service qcom.ServiceType) *Transport {
 	return &Transport{
 		conn:    conn,
+		service: service,
 		pending: make(map[messageKey]chan responseResult),
 		subs:    make(map[uint64]subscription),
 	}
+}
+
+func (t *Transport) QMIService() qcom.ServiceType {
+	return t.service
 }
 
 func (t *Transport) Close() error {
@@ -62,6 +72,10 @@ func (t *Transport) Close() error {
 }
 
 func (t *Transport) Do(ctx context.Context, req qcom.Request) (qcom.Response, error) {
+	if req.Service != t.service {
+		return qcom.Response{}, fmt.Errorf("QRTR transport is bound to service 0x%02X, got request for service 0x%02X", t.service, req.Service)
+	}
+
 	packet, err := (Request{Request: req}).MarshalBinary()
 	if err != nil {
 		return qcom.Response{}, err
@@ -97,7 +111,11 @@ func (t *Transport) Do(ctx context.Context, req qcom.Request) (qcom.Response, er
 	}
 }
 
-func (t *Transport) Indications(ctx context.Context, _ qcom.ServiceType, _ uint8, id qcom.MessageID) (<-chan qcom.Indication, error) {
+func (t *Transport) Indications(ctx context.Context, service qcom.ServiceType, _ uint8, id qcom.MessageID) (<-chan qcom.Indication, error) {
+	if service != t.service {
+		return nil, fmt.Errorf("QRTR transport is bound to service 0x%02X, got indication subscription for service 0x%02X", t.service, service)
+	}
+
 	ch := make(chan qcom.Indication, 16)
 	sub := subscription{message: id, ch: ch}
 
@@ -204,9 +222,9 @@ func (t *Transport) readLoop() {
 		}
 		switch wire.MessageType {
 		case qcom.MessageTypeResponse:
-			t.deliverResponse(wire.QCOM())
+			t.deliverResponse(wire.qcomResponse(t.service))
 		case qcom.MessageTypeIndication:
-			t.deliverIndication(wire.QCOMIndication())
+			t.deliverIndication(wire.qcomIndication(t.service))
 		}
 	}
 }
@@ -273,6 +291,10 @@ func MarshalRequest(req qcom.Request) ([]byte, error) {
 }
 
 func marshalRequest(req qcom.Request) ([]byte, error) {
+	if req.TransactionID == 0 {
+		return nil, errors.New("QRTR QMI transaction ID is zero")
+	}
+
 	payload, err := req.TLVs.MarshalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("marshal QRTR QMI TLVs: %w", err)

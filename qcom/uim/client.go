@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/damonto/uicc-go/qcom"
@@ -24,7 +23,8 @@ type Reader struct {
 	clientID    uint8
 	catClientID uint8
 	catService  qcom.ServiceType
-	txn         atomic.Uint32
+	txn         uint16
+	ctlTxn      uint8
 	closeOnce   sync.Once
 	closed      bool
 	closeErr    error
@@ -33,19 +33,16 @@ type Reader struct {
 type Option func(*config)
 
 type config struct {
-	slot     uint8
-	clientID uint8
+	slot uint8
+}
+
+type serviceBoundTransport interface {
+	QMIService() qcom.ServiceType
 }
 
 func WithSlot(slot uint8) Option {
 	return func(c *config) {
 		c.slot = slot
-	}
-}
-
-func WithClientID(clientID uint8) Option {
-	return func(c *config) {
-		c.clientID = clientID
 	}
 }
 
@@ -65,16 +62,20 @@ func New(ctx context.Context, transport qcom.Transport, opts ...Option) (*Reader
 	reader := &Reader{
 		transport: transport,
 		slot:      cfg.slot,
-		clientID:  cfg.clientID,
 	}
-	if reader.clientID == 0 {
-		if err := reader.allocateClientID(ctx); err != nil {
+	if service, ok := boundQMIService(transport); ok {
+		if service != qcom.ServiceUIM {
 			_ = transport.Close()
-			if errors.Is(err, io.EOF) {
-				return nil, errors.New("creating QMI UIM client: transport closed while allocating client ID")
-			}
-			return nil, fmt.Errorf("creating QMI UIM client: %w", err)
+			return nil, fmt.Errorf("creating QMI UIM client: transport is bound to service 0x%02X, want UIM service 0x%02X", service, qcom.ServiceUIM)
 		}
+		return reader, nil
+	}
+	if err := reader.allocateClientID(ctx); err != nil {
+		_ = transport.Close()
+		if errors.Is(err, io.EOF) {
+			return nil, errors.New("creating QMI UIM client: transport closed while allocating client ID")
+		}
+		return nil, fmt.Errorf("creating QMI UIM client: %w", err)
 	}
 	return reader, nil
 }
@@ -94,13 +95,18 @@ func (r *Reader) Close() error {
 		}
 
 		var releaseErr error
+		_, serviceBound := boundQMIService(transport)
 		if r.catClientID != 0 {
-			releaseErr = r.releaseServiceClientID(ctx, r.catService, r.catClientID)
+			if !serviceBound {
+				releaseErr = r.releaseServiceClientID(ctx, r.catService, r.catClientID)
+			}
 			r.catClientID = 0
 			r.catService = 0
 		}
 		if r.clientID != 0 {
-			releaseErr = errors.Join(releaseErr, r.releaseServiceClientID(ctx, qcom.ServiceUIM, r.clientID))
+			if !serviceBound {
+				releaseErr = errors.Join(releaseErr, r.releaseServiceClientID(ctx, qcom.ServiceUIM, r.clientID))
+			}
 			r.clientID = 0
 		}
 
@@ -114,4 +120,28 @@ func (r *Reader) Close() error {
 		r.closeErr = errors.Join(releaseErr, closeErr)
 	})
 	return r.closeErr
+}
+
+func boundQMIService(transport qcom.Transport) (qcom.ServiceType, bool) {
+	bound, ok := transport.(serviceBoundTransport)
+	if !ok {
+		return 0, false
+	}
+	return bound.QMIService(), true
+}
+
+func (r *Reader) nextTransactionID(service qcom.ServiceType) uint16 {
+	if service == qcom.ServiceControl {
+		r.ctlTxn++
+		if r.ctlTxn == 0 {
+			r.ctlTxn++
+		}
+		return uint16(r.ctlTxn)
+	}
+
+	r.txn++
+	if r.txn == 0 {
+		r.txn++
+	}
+	return r.txn
 }

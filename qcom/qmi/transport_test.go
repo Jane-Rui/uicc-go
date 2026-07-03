@@ -79,6 +79,48 @@ func TestMarshalRequest(t *testing.T) {
 	}
 }
 
+func TestMarshalRequestRejectsInvalidRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  qcom.Request
+	}{
+		{
+			name: "zero transaction",
+			req: qcom.Request{
+				Service:       qcom.ServiceUIM,
+				ClientID:      7,
+				TransactionID: 0,
+				MessageID:     qcom.MessageReadTransparent,
+			},
+		},
+		{
+			name: "control client id",
+			req: qcom.Request{
+				Service:       qcom.ServiceControl,
+				ClientID:      1,
+				TransactionID: 1,
+				MessageID:     qcom.MessageGetVersionInfo,
+			},
+		},
+		{
+			name: "control overflow",
+			req: qcom.Request{
+				Service:       qcom.ServiceControl,
+				TransactionID: 256,
+				MessageID:     qcom.MessageGetVersionInfo,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := MarshalRequest(tt.req); err == nil {
+				t.Fatal("MarshalRequest() error = nil, want transaction ID error")
+			}
+		})
+	}
+}
+
 func TestMarshalRequestReturnsTLVError(t *testing.T) {
 	req := qcom.Request{
 		Service:       qcom.ServiceUIM,
@@ -135,7 +177,7 @@ func TestResponseUnmarshalBinary(t *testing.T) {
 			if err := wire.UnmarshalBinary(tt.frame); err != nil {
 				t.Fatalf("UnmarshalBinary() error = %v", err)
 			}
-			resp := wire.QCOM()
+			resp := wire.qcomResponse()
 			if resp.Service != tt.service || resp.ClientID != tt.client || resp.TransactionID != tt.txn || resp.MessageID != tt.message {
 				t.Fatalf("UnmarshalBinary() = %+v", resp)
 			}

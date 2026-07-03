@@ -48,7 +48,7 @@ func Open(ctx context.Context, opts ...Option) (*Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return New(conn), nil
+	return newTransport(conn, cfg.service), nil
 }
 
 func (d DirectDialer) Dial(ctx context.Context, service qcom.ServiceType) (packetConn, error) {

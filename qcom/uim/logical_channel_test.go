@@ -94,6 +94,30 @@ func TestReaderLogicalChannelPrimitives(t *testing.T) {
 	}
 }
 
+func TestSendAPDURejectsLongResponse(t *testing.T) {
+	reader := &Reader{
+		transport: &fakeTransport{
+			t: t,
+			calls: []transportCall{
+				{
+					resp: errorResponse(
+						qcom.MessageSendAPDU,
+						qcom.QMIErrorInsufficientResources,
+						tlv.Bytes(0x11, []byte{0x04, 0x00, 0x01, 0x00, 0x00, 0x00}),
+					),
+				},
+			},
+		},
+		slot:     1,
+		clientID: 7,
+	}
+
+	_, err := reader.SendAPDU(context.Background(), 1, []byte{0x00, 0xA4, 0x00, 0x00})
+	if err == nil || !strings.Contains(err.Error(), "long response is not supported") {
+		t.Fatalf("SendAPDU() error = %v, want long response error", err)
+	}
+}
+
 func TestOpenLogicalChannelRequestMarshalBinary(t *testing.T) {
 	tests := []struct {
 		name    string

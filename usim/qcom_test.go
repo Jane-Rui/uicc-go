@@ -79,6 +79,10 @@ func (t *simTransport) Close() error {
 	return nil
 }
 
+func (t *simTransport) QMIService() qcom.ServiceType {
+	return qcom.ServiceUIM
+}
+
 func TestNewWithFakeQMITransport(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -133,7 +137,7 @@ func TestNewWithFakeQMITransport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader, err := uim.New(context.Background(), tt.transport, uim.WithSlot(1), uim.WithClientID(1))
+			reader, err := uim.New(context.Background(), tt.transport, uim.WithSlot(1))
 			if err != nil {
 				t.Fatalf("uim.New() error = %v", err)
 			}
@@ -197,7 +201,7 @@ func TestAKAWithFakeQMITransport(t *testing.T) {
 			reader, err := uim.New(context.Background(), &simTransport{
 				files: newUSIMOnlyTransport().files,
 				auth:  tt.body,
-			}, uim.WithSlot(1), uim.WithClientID(1))
+			}, uim.WithSlot(1))
 			if err != nil {
 				t.Fatalf("uim.New() error = %v", err)
 			}

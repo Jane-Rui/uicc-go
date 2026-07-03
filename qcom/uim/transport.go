@@ -103,7 +103,7 @@ func (r *Reader) sendRequest(
 	return r.transport.Do(ctx, qcom.Request{
 		Service:       service,
 		ClientID:      clientID,
-		TransactionID: uint16(r.txn.Add(1)),
+		TransactionID: r.nextTransactionID(service),
 		MessageID:     id,
 		Timeout:       timeout,
 		TLVs:          tlvs,

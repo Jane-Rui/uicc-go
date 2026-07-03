@@ -87,11 +87,19 @@ func (r *Reader) SendAPDU(ctx context.Context, channel uint8, command []byte) ([
 		return nil, fmt.Errorf("sending QMI UIM APDU: %w", err)
 	}
 	if err := resultOK(resp); err != nil {
+		if errors.Is(err, qcom.QMIErrorInsufficientResources) {
+			if _, ok := tlv.Value(resp.TLVs, 0x11); ok {
+				return nil, errors.New("sending QMI UIM APDU: long response is not supported")
+			}
+		}
 		return nil, fmt.Errorf("sending QMI UIM APDU: %w", err)
 	}
 
 	value, ok := tlv.Value(resp.TLVs, 0x10)
 	if !ok {
+		if _, ok := tlv.Value(resp.TLVs, 0x11); ok {
+			return nil, errors.New("sending QMI UIM APDU: long response is not supported")
+		}
 		if err := cardError(resp.TLVs); err != nil {
 			return nil, fmt.Errorf("sending QMI UIM APDU: %w", err)
 		}

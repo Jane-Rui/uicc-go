@@ -17,18 +17,18 @@ type Response struct {
 	TLVs          tlv.TLVs
 }
 
-func (r Response) QCOM() qcom.Response {
+func (r Response) qcomResponse(service qcom.ServiceType) qcom.Response {
 	return qcom.Response{
-		Service:       qcom.ServiceUIM,
+		Service:       service,
 		TransactionID: r.TransactionID,
 		MessageID:     r.MessageID,
 		TLVs:          r.TLVs,
 	}
 }
 
-func (r Response) QCOMIndication() qcom.Indication {
+func (r Response) qcomIndication(service qcom.ServiceType) qcom.Indication {
 	return qcom.Indication{
-		Service:       qcom.ServiceUIM,
+		Service:       service,
 		TransactionID: r.TransactionID,
 		MessageID:     r.MessageID,
 		TLVs:          r.TLVs,

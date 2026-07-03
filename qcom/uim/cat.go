@@ -64,6 +64,9 @@ func (r *Reader) catClient(ctx context.Context) (qcom.ServiceType, uint8, error)
 	if r.catClientID != 0 {
 		return r.catService, r.catClientID, nil
 	}
+	if service, ok := boundQMIService(r.transport); ok {
+		return 0, 0, fmt.Errorf("running QMI CAT envelope: transport is bound to service 0x%02X and cannot switch to CAT/CAT2", service)
+	}
 	if r.catService == 0 {
 		service, err := r.catServiceType(ctx)
 		if err != nil {

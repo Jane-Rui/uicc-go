@@ -20,7 +20,7 @@ type Response struct {
 	TLVs          tlv.TLVs
 }
 
-func (r Response) QCOM() qcom.Response {
+func (r Response) qcomResponse() qcom.Response {
 	return qcom.Response{
 		Service:       r.ServiceType,
 		ClientID:      r.ClientID,
@@ -30,7 +30,7 @@ func (r Response) QCOM() qcom.Response {
 	}
 }
 
-func (r Response) QCOMIndication() qcom.Indication {
+func (r Response) qcomIndication() qcom.Indication {
 	return qcom.Indication{
 		Service:       r.ServiceType,
 		ClientID:      r.ClientID,

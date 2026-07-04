@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -116,6 +117,33 @@ func TestMarshalRequestRejectsInvalidRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := MarshalRequest(tt.req); err == nil {
 				t.Fatal("MarshalRequest() error = nil, want transaction ID error")
+			}
+		})
+	}
+}
+
+func TestTransportEOFPreservesCause(t *testing.T) {
+	tests := []struct {
+		name string
+		conn *deadlineConn
+	}{
+		{
+			name: "read EOF",
+			conn: &deadlineConn{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := New(tt.conn)
+			_, err := transport.Do(context.Background(), qcom.Request{
+				Service:       qcom.ServiceUIM,
+				ClientID:      7,
+				TransactionID: 1,
+				MessageID:     qcom.MessageGetCardStatus,
+			})
+			if !errors.Is(err, io.EOF) {
+				t.Fatalf("Do() error = %v, want io.EOF", err)
 			}
 		})
 	}

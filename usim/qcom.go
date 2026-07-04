@@ -223,10 +223,7 @@ func (r *QCOM) Respond(ctx context.Context, session STKSession, response stk.Ter
 	if err != nil {
 		return err
 	}
-	if err := cat.TerminalResponse(ctx, session.Ref, data); err != nil {
-		return fmt.Errorf("sending QCOM STK terminal response: %w", err)
-	}
-	return nil
+	return cat.TerminalResponse(ctx, session.Ref, data)
 }
 
 func (r *QCOM) Envelope(ctx context.Context, envelope []byte) (stk.EnvelopeResponse, error) {

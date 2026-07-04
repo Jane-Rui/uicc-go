@@ -67,7 +67,7 @@ func (t *Transport) QMIService() qcom.ServiceType {
 
 func (t *Transport) Close() error {
 	err := t.conn.Close()
-	t.failAll(errors.New("QRTR transport is closed"))
+	t.fail(errors.New("QRTR transport is closed"))
 	return err
 }
 
@@ -211,13 +211,13 @@ func (t *Transport) readLoop() {
 		buf := make([]byte, qcom.MaxQRTRQMIMessageLength)
 		n, err := t.conn.Read(buf)
 		if err != nil {
-			t.failAll(fmt.Errorf("reading QRTR QMI message: %w", err))
+			t.fail(fmt.Errorf("reading QRTR QMI message: %w", err))
 			return
 		}
 
 		var wire Response
 		if err := wire.UnmarshalBinary(buf[:n]); err != nil {
-			t.failAll(err)
+			t.fail(err)
 			return
 		}
 		switch wire.MessageType {
@@ -264,7 +264,7 @@ func trySendIndication(ch chan qcom.Indication, ind qcom.Indication) {
 	}
 }
 
-func (t *Transport) failAll(err error) {
+func (t *Transport) fail(err error) {
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -176,6 +177,32 @@ func TestTransportRejectsWrongIndicationService(t *testing.T) {
 	_, err := transport.Indications(context.Background(), qcom.ServiceCAT2, 0, qcom.MessageSendEnvelope)
 	if err == nil {
 		t.Fatal("Indications() error = nil, want service mismatch")
+	}
+}
+
+func TestTransportEOFPreservesCause(t *testing.T) {
+	tests := []struct {
+		name string
+		conn *deadlinePacketConn
+	}{
+		{
+			name: "read EOF",
+			conn: &deadlinePacketConn{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := New(tt.conn)
+			_, err := transport.Do(context.Background(), qcom.Request{
+				Service:       qcom.ServiceUIM,
+				TransactionID: 1,
+				MessageID:     qcom.MessageGetCardStatus,
+			})
+			if !errors.Is(err, io.EOF) {
+				t.Fatalf("Do() error = %v, want io.EOF", err)
+			}
+		})
 	}
 }
 

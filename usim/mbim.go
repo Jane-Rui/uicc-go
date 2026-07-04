@@ -180,10 +180,7 @@ func (r *MBIM) Respond(ctx context.Context, session STKSession, response stk.Ter
 	if err != nil {
 		return err
 	}
-	if err := r.TerminalResponse(ctx, session.Ref, data); err != nil {
-		return fmt.Errorf("sending MBIM STK terminal response: %w", err)
-	}
-	return nil
+	return r.TerminalResponse(ctx, session.Ref, data)
 }
 
 func (r *MBIM) Envelope(ctx context.Context, envelope []byte) (stk.EnvelopeResponse, error) {

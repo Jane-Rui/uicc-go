@@ -331,7 +331,7 @@ func (r *Reader) fetchSTK(ctx context.Context, length byte) error {
 func (r *Reader) transmitSTKAPDU(ctx context.Context, req []byte) ([]byte, error) {
 	r.stkMu.Lock()
 	defer r.stkMu.Unlock()
-	return r.tx.Transmit(ctx, req)
+	return r.transmitResponse(ctx, req)
 }
 
 func (r *Reader) flushPendingSTK(ctx context.Context, out chan<- STKSession) {
@@ -473,6 +473,28 @@ func (r *Reader) transmitEnvelopeCommand(ctx context.Context, cmd encoding.Binar
 }
 
 func (r *Reader) transmit(ctx context.Context, req []byte) (apdu.Response, error) {
+	resp, err := r.transmitResponse(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if !resp.OK() {
+		return nil, apdu.StatusError{SW: resp.SW()}
+	}
+	return resp, nil
+}
+
+func (r *Reader) transmitEnvelope(ctx context.Context, req []byte) (apdu.Response, error) {
+	resp, err := r.transmitResponse(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SW1() != 0x90 && resp.SW1() != 0x91 {
+		return nil, apdu.StatusError{SW: resp.SW()}
+	}
+	return resp, nil
+}
+
+func (r *Reader) transmitResponse(ctx context.Context, req []byte) (apdu.Response, error) {
 	raw, err := r.tx.Transmit(ctx, req)
 	if err != nil {
 		return nil, err
@@ -481,7 +503,10 @@ func (r *Reader) transmit(ctx context.Context, req []byte) (apdu.Response, error
 	if len(resp) < 2 {
 		return nil, apdu.ErrMalformedResponse
 	}
+	return r.followGetResponse(ctx, resp)
+}
 
+func (r *Reader) followGetResponse(ctx context.Context, resp apdu.Response) (apdu.Response, error) {
 	data := append([]byte(nil), resp.Data()...)
 	for resp.HasMore() {
 		length := resp.SW2()
@@ -506,43 +531,6 @@ func (r *Reader) transmit(ctx context.Context, req []byte) (apdu.Response, error
 		data = append(data, resp.Data()...)
 	}
 
-	if !resp.OK() {
-		return nil, apdu.StatusError{SW: resp.SW()}
-	}
-	return append(data, byte(resp.SW()>>8), byte(resp.SW())), nil
-}
-
-func (r *Reader) transmitEnvelope(ctx context.Context, req []byte) (apdu.Response, error) {
-	raw, err := r.tx.Transmit(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	resp := apdu.Response(raw)
-	if len(resp) < 2 {
-		return nil, apdu.ErrMalformedResponse
-	}
-
-	data := append([]byte(nil), resp.Data()...)
-	for resp.HasMore() {
-		length := resp.SW2()
-		req, err := (apdu.Request{CLA: 0x00, INS: 0xC0, P1: 0x00, P2: 0x00, Le: &length}).MarshalBinary()
-		if err != nil {
-			return nil, fmt.Errorf("building GET RESPONSE APDU: %w", err)
-		}
-		follow, err := r.tx.Transmit(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("reading response body: %w", err)
-		}
-		resp = apdu.Response(follow)
-		if len(resp) < 2 {
-			return nil, apdu.ErrMalformedResponse
-		}
-		data = append(data, resp.Data()...)
-	}
-
-	if resp.SW1() != 0x90 && resp.SW1() != 0x91 {
-		return nil, apdu.StatusError{SW: resp.SW()}
-	}
 	return append(data, byte(resp.SW()>>8), byte(resp.SW())), nil
 }
 

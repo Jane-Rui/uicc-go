@@ -269,45 +269,37 @@ func TestBaudRateOrDefault(t *testing.T) {
 }
 
 func TestRunKeepsBufferedDataAcrossCalls(t *testing.T) {
-	port := &scriptPort{readData: "\r\nAT+CSIM=?\r\n\r\nOK\r\nAT+CSIM=4,\"00\"\r\n+CSIM: 4,\"9000\"\r\nOK\r\n"}
+	port := &scriptPort{readData: "\r\n+CIND: 0,4,1,1,1,1,1,0\r\nOK\r\nAT+CSIM=4,\"00\"\r\n+CSIM: 4,\"9000\"\r\nOK\r\n"}
 	reader := &Reader{
 		port:   port,
 		reader: bufio.NewReader(port),
 	}
 
-	got, err := reader.run(context.Background(), "AT+CSIM=?")
+	got, err := reader.run(context.Background(), `AT+CSIM=4,"00"`)
 	if err != nil {
-		t.Fatalf("first run() error = %v", err)
-	}
-	if got != "" {
-		t.Fatalf("first run() = %q, want empty response", got)
-	}
-
-	got, err = reader.run(context.Background(), `AT+CSIM=4,"00"`)
-	if err != nil {
-		t.Fatalf("second run() error = %v", err)
+		t.Fatalf("run() error = %v", err)
 	}
 	if got != `+CSIM: 4,"9000"` {
-		t.Fatalf("second run() = %q, want %q", got, `+CSIM: 4,"9000"`)
+		t.Fatalf("run() = %q, want %q", got, `+CSIM: 4,"9000"`)
 	}
 
-	if string(port.written) != "AT+CSIM=?\r\nAT+CSIM=4,\"00\"\r\n" {
+	if string(port.written) != "AT+CSIM=4,\"00\"\r\n" {
 		t.Fatalf("written commands = %q", string(port.written))
 	}
 }
 
 func TestRunWritesCompleteCommand(t *testing.T) {
-	port := &partialWritePort{readData: "AT+TEST\r\nOK\r\n", max: 3}
+	port := &partialWritePort{readData: "AT+CSIM=2,\"00\"\r\n+CSIM: 4,\"9000\"\r\nOK\r\n", max: 3}
 	reader := &Reader{
 		port:   port,
 		reader: bufio.NewReader(port),
 	}
 
-	if _, err := reader.run(context.Background(), "AT+TEST"); err != nil {
+	if _, err := reader.run(context.Background(), `AT+CSIM=2,"00"`); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	if got := port.written.String(); got != "AT+TEST\r\n" {
-		t.Fatalf("write = %q, want %q", got, "AT+TEST\r\n")
+	if got := port.written.String(); got != "AT+CSIM=2,\"00\"\r\n" {
+		t.Fatalf("write = %q, want %q", got, "AT+CSIM=2,\"00\"\r\n")
 	}
 }
 
@@ -316,11 +308,11 @@ func TestRunSetsDeadlines(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	port := &deadlinePort{
-		scriptPort: scriptPort{readData: "AT+TEST\r\nOK\r\n"},
+		scriptPort: scriptPort{readData: "AT+CSIM=2,\"00\"\r\n+CSIM: 4,\"9000\"\r\nOK\r\n"},
 	}
 	reader := newReader(port)
 
-	if _, err := reader.run(ctx, "AT+TEST"); err != nil {
+	if _, err := reader.run(ctx, `AT+CSIM=2,"00"`); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	if len(port.readDeadlines) == 0 {
@@ -342,7 +334,7 @@ func TestRunReturnsContextWhenReadUnblocksAfterCancel(t *testing.T) {
 	port := &cancelReadPort{cancel: cancel}
 	reader := newReader(port)
 
-	_, err := reader.run(ctx, "AT+TEST")
+	_, err := reader.run(ctx, `AT+CSIM=2,"00"`)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run() error = %v, want %v", err, context.Canceled)
 	}
@@ -353,36 +345,20 @@ func TestRunReturnsContextWhenWriteUnblocksAfterCancel(t *testing.T) {
 	port := &cancelWritePort{cancel: cancel}
 	reader := newReader(port)
 
-	_, err := reader.run(ctx, "AT+TEST")
+	_, err := reader.run(ctx, `AT+CSIM=2,"00"`)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("run() error = %v, want %v", err, context.Canceled)
 	}
 }
 
-func TestRunMatchesCompleteResultCodes(t *testing.T) {
-	port := &scriptPort{readData: "AT+TEST\r\n+INFO: LOOKUP\r\nOK\r\n"}
-	reader := &Reader{
-		port:   port,
-		reader: bufio.NewReader(port),
-	}
-
-	got, err := reader.run(context.Background(), "AT+TEST")
-	if err != nil {
-		t.Fatalf("run() error = %v", err)
-	}
-	if got != "+INFO: LOOKUP" {
-		t.Fatalf("run() = %q, want %q", got, "+INFO: LOOKUP")
-	}
-}
-
 func TestRunReturnsStructuredATErrors(t *testing.T) {
-	port := &scriptPort{readData: "AT+TEST\r\n+CME ERROR: 42\r\n"}
+	port := &scriptPort{readData: "AT+CSIM=2,\"00\"\r\n+CME ERROR: 42\r\n"}
 	reader := &Reader{
 		port:   port,
 		reader: bufio.NewReader(port),
 	}
 
-	_, err := reader.run(context.Background(), "AT+TEST")
+	_, err := reader.run(context.Background(), `AT+CSIM=2,"00"`)
 	if err == nil {
 		t.Fatal("run() error = nil, want error")
 	}
@@ -423,6 +399,43 @@ func TestTransmitRejectsShortStatusWord(t *testing.T) {
 	}
 }
 
+func TestTransmitWaitsForCSIMResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     []byte
+	}{
+		{
+			name:     "unsolicited before CSIM",
+			response: "AT+CSIM=2,\"00\"\r\n+CIND: 0,4,1,1,1,1,1,0\r\n+CSIM: 4,\"9000\"\r\nOK\r\n",
+			want:     []byte{0x90, 0x00},
+		},
+		{
+			name:     "stale result before CSIM",
+			response: "+CIND: 0,4,1,1,1,1,1,0\r\nOK\r\nAT+CSIM=2,\"00\"\r\n+CSIM: 4,\"9000\"\r\nOK\r\n",
+			want:     []byte{0x90, 0x00},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			port := &scriptPort{readData: tt.response}
+			reader := &Reader{
+				port:   port,
+				reader: bufio.NewReader(port),
+			}
+
+			got, err := reader.Transmit(context.Background(), []byte{0x00})
+			if err != nil {
+				t.Fatalf("Transmit() error = %v", err)
+			}
+			if !bytes.Equal(got, tt.want) {
+				t.Fatalf("Transmit() = % X, want % X", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRun(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -434,16 +447,16 @@ func TestRun(t *testing.T) {
 	}{
 		{
 			name:      "skip echo and blank lines",
-			response:  "\r\nAT\r\n\r\n+CSIM: 4,\"9000\"\r\nOK\r\n",
-			command:   "AT",
+			response:  "\r\nAT+CSIM=2,\"00\"\r\n\r\n+CSIM: 4,\"9000\"\r\nOK\r\n",
+			command:   `AT+CSIM=2,"00"`,
 			want:      `+CSIM: 4,"9000"`,
-			wantWrite: "AT\r\n",
+			wantWrite: "AT+CSIM=2,\"00\"\r\n",
 		},
 		{
 			name:      "cme error",
-			response:  "\r\nAT+CMEE=2\r\n+CME ERROR: operation not supported\r\n",
-			command:   "AT+CMEE=2",
-			wantWrite: "AT+CMEE=2\r\n",
+			response:  "\r\nAT+CSIM=2,\"00\"\r\n+CME ERROR: operation not supported\r\n",
+			command:   `AT+CSIM=2,"00"`,
+			wantWrite: "AT+CSIM=2,\"00\"\r\n",
 			wantErr:   true,
 		},
 	}

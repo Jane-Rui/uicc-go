@@ -114,7 +114,32 @@ func (d *Reader) run(ctx context.Context, command string) (string, error) {
 		return "", fmt.Errorf("writing AT command %q: %w", command, err)
 	}
 
-	var builder strings.Builder
+	return d.readResponse(ctx, command)
+}
+
+func (d *Reader) readResponse(ctx context.Context, command string) (string, error) {
+	var response string
+	for {
+		line, err := d.readLine(ctx, command)
+		if err != nil {
+			return "", err
+		}
+
+		upper := strings.ToUpper(line)
+		switch {
+		case upper == "OK":
+			if response != "" {
+				return response, nil
+			}
+		case upper == "ERROR", strings.HasPrefix(upper, "+CME ERROR:"), strings.HasPrefix(upper, "+CMS ERROR:"):
+			return "", errors.New(line)
+		case strings.HasPrefix(upper, "+CSIM:"):
+			response = line
+		}
+	}
+}
+
+func (d *Reader) readLine(ctx context.Context, command string) (string, error) {
 	for {
 		if err := d.setReadDeadline(ctx); err != nil {
 			return "", err
@@ -134,21 +159,8 @@ func (d *Reader) run(ctx context.Context, command string) (string, error) {
 		}
 
 		line = strings.TrimSpace(line)
-		if line == "" || line == command {
-			continue
-		}
-
-		upper := strings.ToUpper(line)
-		switch {
-		case upper == "OK":
-			return strings.TrimSpace(builder.String()), nil
-		case upper == "ERROR", strings.HasPrefix(upper, "+CME ERROR:"), strings.HasPrefix(upper, "+CMS ERROR:"):
-			return "", errors.New(line)
-		default:
-			if builder.Len() > 0 {
-				builder.WriteByte('\n')
-			}
-			builder.WriteString(line)
+		if line != "" && line != command {
+			return line, nil
 		}
 	}
 }

@@ -306,6 +306,21 @@ func TestReaderSTKFetchesPendingCommand(t *testing.T) {
 	}
 }
 
+func TestReaderSTKTerminalProfileFollowsGetResponse(t *testing.T) {
+	tx := &fakeAPDUTransmitter{
+		t: t,
+		calls: []apduCall{
+			{want: []byte{0x80, 0x10, 0x00, 0x00, 0x01, 0x01}, resp: []byte{0x61, 0x02}},
+			{want: []byte{0x00, 0xC0, 0x00, 0x00, 0x02}, resp: []byte{0xAA, 0xBB, 0x90, 0x00}},
+		},
+	}
+	reader := newTestSTKReader(t, tx)
+
+	if err := reader.applyProfile(context.Background(), stk.Profile{Data: []byte{0x01}}); err != nil {
+		t.Fatalf("applyProfile() error = %v", err)
+	}
+}
+
 func TestReaderSTKTerminalResponseAPDU(t *testing.T) {
 	tx := &fakeAPDUTransmitter{
 		t: t,

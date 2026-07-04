@@ -3,6 +3,7 @@ package usim
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/damonto/uicc-go/usim/stk"
 )
@@ -240,6 +241,7 @@ func (s *STK) dispatchSimple(ctx context.Context, callbacks STKCallbacks, cmd st
 		if callbacks.ProvideLocalInfo != nil {
 			return callbacks.ProvideLocalInfo(ctx, cmd)
 		}
+		return provideLocalInfoResponse(cmd), nil
 	case stk.CommandSetupIdleModeText:
 		if callbacks.SetupIdleModeText != nil {
 			return callbacks.SetupIdleModeText(ctx, cmd)
@@ -257,6 +259,23 @@ func (s *STK) dispatchSimple(ctx context.Context, callbacks STKCallbacks, cmd st
 		return callbacks.Generic(ctx, stk.GenericCommand{CommandFrame: cmd.CommandFrame})
 	}
 	return stk.Result(stk.ResultCommandBeyondTerminalCapabilities), nil
+}
+
+func provideLocalInfoResponse(cmd stk.SimpleCommand) stk.TerminalResponse {
+	switch cmd.Details.Qualifier {
+	case 0x03:
+		return stk.TerminalResponse{
+			Result:       stk.ResultCommandPerformed,
+			DateTimeZone: stk.DateTimeZone(time.Now()),
+		}
+	case 0x04:
+		return stk.TerminalResponse{
+			Result:   stk.ResultCommandPerformed,
+			Language: "en",
+		}
+	default:
+		return stk.Result(stk.ResultCommandBeyondTerminalCapabilities)
+	}
 }
 
 func FullSTKProfile() stk.Profile {

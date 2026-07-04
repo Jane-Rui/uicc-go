@@ -203,6 +203,89 @@ func TestFullSTKProfileIncludesInteractiveCommands(t *testing.T) {
 	}
 }
 
+func TestProvideLocalInfoDefaultResponses(t *testing.T) {
+	tests := []struct {
+		name      string
+		qualifier byte
+		want      stkpkg.ResultCode
+		wantTLV   byte
+		wantTag   byte
+		wantValue func([]byte) bool
+	}{
+		{
+			name:      "date time zone",
+			qualifier: 0x03,
+			want:      stkpkg.ResultCommandPerformed,
+			wantTLV:   0x26,
+			wantTag:   0xA6,
+			wantValue: func(value []byte) bool {
+				return len(value) == 7
+			},
+		},
+		{
+			name:      "language",
+			qualifier: 0x04,
+			want:      stkpkg.ResultCommandPerformed,
+			wantTLV:   0x2D,
+			wantTag:   0xAD,
+			wantValue: func(value []byte) bool {
+				return string(value) == "en"
+			},
+		},
+		{
+			name:      "unsupported",
+			qualifier: 0x7F,
+			want:      stkpkg.ResultCommandBeyondTerminalCapabilities,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := stkpkg.SimpleCommand{CommandFrame: stkpkg.CommandFrame{
+				Details: stkpkg.CommandDetails{Number: 1, Type: stkpkg.CommandProvideLocalInfo, Qualifier: tt.qualifier},
+				Devices: stkpkg.DeviceIdentities{Source: stkpkg.DeviceUICC, Destination: stkpkg.DeviceTerminal},
+			}}
+			resp := provideLocalInfoResponse(cmd)
+			if resp.Result != tt.want {
+				t.Fatalf("Result = 0x%02X, want 0x%02X", resp.Result, tt.want)
+			}
+
+			data, err := resp.MarshalFor(cmd)
+			if err != nil {
+				t.Fatalf("MarshalFor() error = %v", err)
+			}
+			var items tlv.Items
+			if err := items.UnmarshalBinary(data); err != nil {
+				t.Fatalf("UnmarshalBinary() error = %v", err)
+			}
+			if tt.wantTLV == 0 {
+				if len(items) != 3 {
+					t.Fatalf("terminal response TLVs = %d, want 3: % X", len(items), data)
+				}
+				for _, tag := range []byte{0x26, 0x2D} {
+					item, ok := items.Find(tag)
+					if ok {
+						t.Fatalf("terminal response includes TLV 0x%02X = % X, want absent", tag, item.Value)
+					}
+				}
+				return
+			}
+			item, ok := items.Find(tt.wantTLV)
+			if !ok {
+				t.Fatalf("terminal response = % X, want TLV 0x%02X", data, tt.wantTLV)
+			}
+			if len(items) != 4 {
+				t.Fatalf("terminal response TLVs = %d, want 4: % X", len(items), data)
+			}
+			if item.Tag != tt.wantTag {
+				t.Fatalf("TLV tag = 0x%02X, want 0x%02X", item.Tag, tt.wantTag)
+			}
+			if !tt.wantValue(item.Value) {
+				t.Fatalf("TLV 0x%02X value = % X", tt.wantTLV, item.Value)
+			}
+		})
+	}
+}
+
 func TestSTKUsesEnvelopeForBuiltInBIPEvents(t *testing.T) {
 	transport := &fakeSTKTransport{}
 	stk, err := newSTK(transport)

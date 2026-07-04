@@ -3,6 +3,7 @@ package stk
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/damonto/uicc-go/usim/tlv"
 )
@@ -14,6 +15,7 @@ type TerminalResponse struct {
 	ItemIdentifier    *byte
 	Duration          *Duration
 	Language          string
+	DateTimeZone      []byte
 	ChannelStatus     []byte
 	ChannelStatuses   []ChannelStatus
 	ChannelData       []byte
@@ -32,6 +34,37 @@ func OK() TerminalResponse {
 
 func Result(result ResultCode, additionalInfo ...byte) TerminalResponse {
 	return TerminalResponse{Result: result, AdditionalInfo: slices.Clone(additionalInfo)}
+}
+
+// DateTimeZone returns the seven-byte date/time/timezone value used by
+// PROVIDE LOCAL INFORMATION terminal responses.
+func DateTimeZone(t time.Time) []byte {
+	_, offset := t.Zone()
+	quarters := offset / (15 * 60)
+	sign := byte(0)
+	if quarters < 0 {
+		sign = 0x08
+		quarters = -quarters
+	}
+	return []byte{
+		swappedBCD(t.Year() % 100),
+		swappedBCD(int(t.Month())),
+		swappedBCD(t.Day()),
+		swappedBCD(t.Hour()),
+		swappedBCD(t.Minute()),
+		swappedBCD(t.Second()),
+		swappedBCD(quarters) | sign,
+	}
+}
+
+func swappedBCD(n int) byte {
+	if n < 0 {
+		n = 0
+	}
+	if n > 99 {
+		n = 99
+	}
+	return byte(n%10)<<4 | byte(n/10)
 }
 
 func (r TerminalResponse) MarshalFor(cmd Command) ([]byte, error) {
@@ -57,6 +90,9 @@ func (r TerminalResponse) MarshalFor(cmd Command) ([]byte, error) {
 	}
 	if r.Language != "" {
 		items = append(items, tlv.NewComprehension(tlvLanguage, []byte(r.Language)))
+	}
+	if len(r.DateTimeZone) > 0 {
+		items = append(items, tlv.NewComprehension(tlvDateTimeZone, r.DateTimeZone))
 	}
 	if len(r.ChannelStatus) > 0 {
 		items = append(items, tlv.NewComprehension(tlvChannelStatus, r.ChannelStatus))

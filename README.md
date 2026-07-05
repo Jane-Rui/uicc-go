@@ -292,6 +292,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 
 	"github.com/damonto/uicc-go/at"
 	"github.com/damonto/uicc-go/usim"
@@ -310,7 +311,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	card, err := usim.New(ctx, reader)
+	card, err := usim.New(ctx, reader, slog.Default())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -376,7 +377,7 @@ reader, err := usim.NewQCOM(uimReader)
 if err != nil {
 	return err
 }
-card, err := usim.New(ctx, reader)
+card, err := usim.New(ctx, reader, slog.Default())
 if err != nil {
 	return err
 }
@@ -461,8 +462,6 @@ return toolkit.Run(ctx, callbacks)
 ```
 
 Keep the `uim.Reader` open for as long as the STK run is active. Closing it releases the CAT2 client and drops the claimed event registration.
-
-Do not scan CAT2 CIDs up to 255. The Qualcomm reference stack keeps CAT client IDs in a small service-local range (`1..5` on the tested CAT2 firmware), and invalid high CIDs may time out instead of returning `InvalidClientId`. The default helper probes only that small range and only releases a CID after `GET_SERVICE_STATE` proves it owns the requested raw bits.
 
 This is still a deliberate takeover of another CAT2 client. Releasing the owner can disrupt whatever process or daemon owns that CAT2 CID until it reallocates a client or the modem is reset.
 

@@ -60,17 +60,12 @@ func (u *Card) HomeDomain() string                         { return u.homeDomain
 func (u *Card) AKAIdentityState() AKAIdentityState         { return u.akaState.clone() }
 func (u *Card) SetAKAIdentityState(state AKAIdentityState) { u.akaState = state.clone() }
 
-func New(ctx context.Context, tx usimcard.Reader, loggers ...*slog.Logger) (*Card, error) {
+func New(ctx context.Context, tx usimcard.Reader, logger *slog.Logger) (*Card, error) {
 	if tx == nil {
 		return nil, errors.New("creating USIM: reader is nil")
 	}
-	if len(loggers) > 1 {
-		return nil, errors.New("creating USIM: multiple loggers configured")
-	}
-
-	logger := slog.Default()
-	if len(loggers) == 1 && loggers[0] != nil {
-		logger = loggers[0]
+	if logger == nil {
+		logger = slog.Default()
 	}
 
 	card := &Card{

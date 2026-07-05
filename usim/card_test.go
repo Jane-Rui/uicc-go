@@ -120,21 +120,21 @@ func linearFixedFile(recordSize, recordCount uint16) usimcard.FileAttributes {
 	}
 }
 
-func TestNewLogger(t *testing.T) {
+func TestNew(t *testing.T) {
 	tests := []struct {
 		name    string
-		loggers []*slog.Logger
+		tx      usimcard.Reader
+		logger  *slog.Logger
 		wantErr bool
 	}{
-		{name: "default"},
-		{name: "nil logger", loggers: []*slog.Logger{nil}},
-		{name: "custom logger", loggers: []*slog.Logger{slog.Default()}},
-		{name: "multiple loggers", loggers: []*slog.Logger{slog.Default(), slog.Default()}, wantErr: true},
+		{name: "nil reader", wantErr: true},
+		{name: "default logger", tx: &loadReader{}},
+		{name: "custom logger", tx: &loadReader{}, logger: slog.Default()},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			card, err := New(context.Background(), &loadReader{}, tt.loggers...)
+			card, err := New(context.Background(), tt.tx, tt.logger)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("New() error = nil, want non-nil")
@@ -413,7 +413,7 @@ func TestNewSkipsUnavailableISIM(t *testing.T) {
 			card, err := New(context.Background(), &loadReader{
 				impiErr: tt.impiErr,
 				impuErr: tt.impuErr,
-			})
+			}, nil)
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -479,7 +479,7 @@ func TestNewServiceCenterPSIPreference(t *testing.T) {
 		{wantAPDU: "00B2010420", resp: append(tlvTextRecord("sip:isim-smsc@example.com", 32), 0x90, 0x00)},
 	}})
 
-	card, err := New(context.Background(), tx)
+	card, err := New(context.Background(), tx, nil)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

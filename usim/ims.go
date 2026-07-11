@@ -18,6 +18,7 @@ const (
 type IMSPDNConfig struct {
 	APN            string
 	PDNType        string
+	ProfileIndex   uint8
 	RequestTimeout time.Duration
 }
 

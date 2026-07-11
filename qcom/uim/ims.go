@@ -17,6 +17,7 @@ const DefaultIMSPDNAPN = "ims"
 type IMSPDNConfig struct {
 	APN            string
 	IPFamily       qcom.WDSIPFamily
+	ProfileIndex   uint8
 	RequestTimeout time.Duration
 }
 
@@ -133,6 +134,7 @@ func (s *IMSPDNSession) start(ctx context.Context, cfg IMSPDNConfig) error {
 		APN:                  cfg.APN,
 		IPFamily:             cfg.IPFamily,
 		TechnologyPreference: qcom.WDSTechnologyPreference3GPP,
+		ProfileIndex3GPP:     cfg.ProfileIndex,
 	}.Request()
 	resp, err := s.reader.requestServiceWithTimeout(
 		ctx,

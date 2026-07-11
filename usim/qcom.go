@@ -43,6 +43,7 @@ func (r *QCOM) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSession
 	session, err := r.reader.OpenIMSPDN(ctx, uim.IMSPDNConfig{
 		APN:            normalized.APN,
 		IPFamily:       qcomIPFamilyForPDNType(normalized.PDNType),
+		ProfileIndex:   normalized.ProfileIndex,
 		RequestTimeout: normalized.RequestTimeout,
 	})
 	if err != nil {

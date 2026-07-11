@@ -45,6 +45,8 @@ const (
 	// WDS service commands
 	MessageWDSStartNetworkInterface MessageID = 0x0020
 	MessageWDSStopNetworkInterface  MessageID = 0x0021
+	MessageWDSGetProfileList        MessageID = 0x002A
+	MessageWDSGetProfileSettings    MessageID = 0x002B
 	MessageWDSGetRuntimeSettings    MessageID = 0x002D
 
 	// DMS service commands
@@ -53,7 +55,8 @@ const (
 	MessageDMSSetOperatingMode MessageID = 0x002E
 
 	// NAS service commands
-	MessageNASGetSysInfo MessageID = 0x004D
+	MessageNASGetServingSystem MessageID = 0x0024
+	MessageNASGetSysInfo       MessageID = 0x004D
 
 	// IMSA service commands
 	MessageIMSAGetRegistrationStatus MessageID = 0x0020
@@ -124,6 +127,44 @@ type WDSTechnologyPreference uint8
 const (
 	WDSTechnologyPreference3GPP WDSTechnologyPreference = 1
 )
+
+// WDSProfileType identifies a modem data-profile technology family.
+type WDSProfileType uint8
+
+const (
+	WDSProfileType3GPP WDSProfileType = iota
+	WDSProfileType3GPP2
+	WDSProfileTypeEPC
+)
+
+// WDSProfileID identifies a stored modem data profile.
+type WDSProfileID struct {
+	Type  WDSProfileType
+	Index uint8
+}
+
+// WDSProfile is one entry returned by WDS Get Profile List.
+type WDSProfile struct {
+	ID   WDSProfileID
+	Name string
+}
+
+// WDSProfileSettings contains selected optional WDS profile fields.
+type WDSProfileSettings struct {
+	ID WDSProfileID
+
+	Name      string
+	NameKnown bool
+	APN       string
+	APNKnown  bool
+
+	PCSCFUsingPCO       bool
+	PCSCFUsingPCOKnown  bool
+	PCSCFUsingDHCP      bool
+	PCSCFUsingDHCPKnown bool
+	IMCN                bool
+	IMCNKnown           bool
+}
 
 // WDSCallEndReason is the basic WDS call end reason returned by start-network.
 type WDSCallEndReason uint16
@@ -196,6 +237,57 @@ const (
 type NASSysInfo struct {
 	VoPSKnown     bool
 	VoPSSupported bool
+}
+
+// NASRegistrationState is the network registration state reported by NAS.
+type NASRegistrationState uint8
+
+const (
+	NASRegistrationNotRegistered NASRegistrationState = iota
+	NASRegistrationRegistered
+	NASRegistrationSearching
+	NASRegistrationDenied
+	NASRegistrationUnknown
+)
+
+// NASAttachState is a circuit-switched or packet-switched attach state.
+type NASAttachState uint8
+
+const (
+	NASAttachUnknown NASAttachState = iota
+	NASAttachAttached
+	NASAttachDetached
+)
+
+// NASSelectedNetwork identifies the selected network family.
+type NASSelectedNetwork uint8
+
+const (
+	NASSelectedNetworkUnknown NASSelectedNetwork = iota
+	NASSelectedNetwork3GPP2
+	NASSelectedNetwork3GPP
+)
+
+// NASRadioInterface identifies a radio interface currently in use.
+type NASRadioInterface uint8
+
+const (
+	NASRadioInterfaceNoService NASRadioInterface = 0
+	NASRadioInterfaceCDMA1X    NASRadioInterface = 1
+	NASRadioInterfaceCDMAEVDO  NASRadioInterface = 2
+	NASRadioInterfaceAMPS      NASRadioInterface = 3
+	NASRadioInterfaceGSM       NASRadioInterface = 4
+	NASRadioInterfaceUMTS      NASRadioInterface = 5
+	NASRadioInterfaceLTE       NASRadioInterface = 8
+)
+
+// NASServingSystem contains the fields from NAS Get Serving System.
+type NASServingSystem struct {
+	RegistrationState NASRegistrationState
+	CSAttachState     NASAttachState
+	PSAttachState     NASAttachState
+	SelectedNetwork   NASSelectedNetwork
+	RadioInterfaces   []NASRadioInterface
 }
 
 // IMSRegistrationStatus is the QMI IMSA registration state.

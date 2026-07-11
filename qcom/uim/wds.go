@@ -19,21 +19,28 @@ type WDSStartNetworkInterfaceRequest struct {
 	APN                  string
 	IPFamily             qcom.WDSIPFamily
 	TechnologyPreference qcom.WDSTechnologyPreference
+	ProfileIndex3GPP     uint8
 }
 
 // Request converts the high-level request fields into a QMI WDS request.
 func (r WDSStartNetworkInterfaceRequest) Request() qcom.Request {
+	tlvs := tlv.TLVs{
+		tlv.Bytes(0x14, []byte(r.APN)),
+		tlv.Uint(0x19, uint8(r.IPFamily)),
+		tlv.Uint(0x30, uint8(r.TechnologyPreference)),
+	}
+	if r.ProfileIndex3GPP != 0 {
+		tlvs = tlv.TLVs{
+			tlv.Uint(0x31, r.ProfileIndex3GPP),
+		}
+	}
 	return qcom.Request{
 		Service:       qcom.ServiceWDS,
 		ClientID:      r.ClientID,
 		TransactionID: r.TransactionID,
 		MessageID:     qcom.MessageWDSStartNetworkInterface,
 		Timeout:       r.Timeout,
-		TLVs: tlv.TLVs{
-			tlv.Bytes(0x14, []byte(r.APN)),
-			tlv.Uint(0x19, uint8(r.IPFamily)),
-			tlv.Uint(0x30, uint8(r.TechnologyPreference)),
-		},
+		TLVs:          tlvs,
 	}
 }
 

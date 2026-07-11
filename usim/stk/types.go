@@ -1,10 +1,7 @@
 package stk
 
 import (
-	"encoding/binary"
 	"fmt"
-	"slices"
-	"unicode/utf16"
 )
 
 const (
@@ -201,75 +198,6 @@ type DeviceIdentities struct {
 	Destination DeviceID
 }
 
-type Text struct {
-	DCS    byte
-	Raw    []byte
-	String string
-}
-
-func (text Text) MarshalBinary() ([]byte, error) {
-	raw := slices.Clone(text.Raw)
-	dcs := text.DCS
-	if len(raw) == 0 && text.String != "" {
-		if dcs == 0 {
-			dcs = 0x04
-		}
-		switch dcs {
-		case 0x00:
-			raw, _ = gsm7Text(text.String).MarshalText()
-		case 0x08:
-			runes := utf16.Encode([]rune(text.String))
-			raw = make([]byte, 0, len(runes)*2)
-			for _, r := range runes {
-				raw = binary.BigEndian.AppendUint16(raw, r)
-			}
-		default:
-			raw = []byte(text.String)
-		}
-	}
-	if len(raw) == 0 && text.String == "" && dcs == 0 {
-		return nil, nil
-	}
-
-	out := make([]byte, 0, 1+len(raw))
-	out = append(out, dcs)
-	out = append(out, raw...)
-	return out, nil
-}
-
-func (text *Text) UnmarshalBinary(data []byte) error {
-	if len(data) == 0 {
-		*text = Text{}
-		return nil
-	}
-	text.unmarshal(data[0], data[1:])
-	return nil
-}
-
-func (text Text) MarshalText() ([]byte, error) {
-	if text.String != "" {
-		return []byte(text.String), nil
-	}
-	var value Text
-	if err := value.UnmarshalBinary(append([]byte{text.DCS}, text.Raw...)); err != nil {
-		return nil, err
-	}
-	return []byte(value.String), nil
-}
-
-func (text *Text) UnmarshalText(data []byte) error {
-	text.unmarshal(0x04, data)
-	return nil
-}
-
-func (text *Text) unmarshal(dcs byte, raw []byte) {
-	*text = Text{
-		DCS:    dcs,
-		Raw:    slices.Clone(raw),
-		String: decodeTextString(dcs, raw),
-	}
-}
-
 type Duration struct {
 	Unit     byte
 	Interval byte
@@ -282,7 +210,7 @@ type Icon struct {
 
 type Item struct {
 	Identifier byte
-	Text       Text
+	Text       AlphaIdentifier
 }
 
 type ResponseLength struct {
@@ -304,27 +232,6 @@ func (r EnvelopeResponse) HasMore() bool {
 	return r.SW1 == 0x91 || r.SW1 == 0x61
 }
 
-func decodeTextString(dcs byte, data []byte) string {
-	switch dcs {
-	case 0x08:
-		if len(data)%2 != 0 {
-			return string(data)
-		}
-		runes := make([]uint16, 0, len(data)/2)
-		for len(data) > 0 {
-			runes = append(runes, binary.BigEndian.Uint16(data[:2]))
-			data = data[2:]
-		}
-		return string(utf16.Decode(runes))
-	case 0x00:
-		var text gsm7Text
-		_ = text.UnmarshalText(data)
-		return string(text)
-	default:
-		return string(data)
-	}
-}
-
 type gsm7Text string
 
 func (text gsm7Text) MarshalText() ([]byte, error) {
@@ -335,7 +242,11 @@ func (text gsm7Text) MarshalText() ([]byte, error) {
 
 	septets := make([]byte, 0, len(value))
 	for _, r := range value {
-		septets = append(septets, gsm7Septets(r)...)
+		encoded, ok := gsm7SeptetsForRune(r)
+		if !ok {
+			return nil, fmt.Errorf("encoding packed GSM text: character %q is not in the GSM default alphabet", r)
+		}
+		septets = append(septets, encoded...)
 	}
 
 	out := make([]byte, (len(septets)*7+7)/8)
@@ -380,10 +291,18 @@ func (text *gsm7Text) UnmarshalText(data []byte) error {
 				continue
 			}
 			i++
-			out = append(out, gsm7ExtensionChar(septets[i]))
+			r, ok := decodeGSMExtension(septets[i])
+			if !ok {
+				return fmt.Errorf("decoding packed GSM text: unknown extension code 0x%02X", septets[i])
+			}
+			out = append(out, r)
 			continue
 		}
-		out = append(out, gsm7Char(septets[i]))
+		r, ok := decodeGSMChar(septets[i])
+		if !ok {
+			return fmt.Errorf("decoding packed GSM text: unknown character code 0x%02X", septets[i])
+		}
+		out = append(out, r)
 	}
 	*text = gsm7Text(string(out))
 	return nil

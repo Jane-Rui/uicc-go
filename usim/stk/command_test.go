@@ -37,8 +37,8 @@ func TestProactiveCommandUnmarshalBinary(t *testing.T) {
 				if !ok {
 					t.Fatalf("UnmarshalBinary() command type = %T, want DisplayTextCommand", cmd)
 				}
-				if got.Text.String != "Hi" {
-					t.Fatalf("Text = %q, want Hi", got.Text.String)
+				if got.Text.Value != "Hi" {
+					t.Fatalf("Text = %q, want Hi", got.Text.Value)
 				}
 				if !got.UserClear || !got.ImmediateResponse {
 					t.Fatalf("flags = userClear:%t immediate:%t, want true/true", got.UserClear, got.ImmediateResponse)
@@ -60,11 +60,53 @@ func TestProactiveCommandUnmarshalBinary(t *testing.T) {
 				if !ok {
 					t.Fatalf("UnmarshalBinary() command type = %T, want SetupMenuCommand", cmd)
 				}
-				if len(got.Items) != 2 || got.Items[1].Identifier != 2 || got.Items[1].Text.String != "two" {
+				if len(got.Items) != 2 || got.Items[1].Identifier != 2 || got.Items[1].Text.Value != "two" {
 					t.Fatalf("items = %+v, want second item two", got.Items)
 				}
 				if got.DefaultItem != 2 || !got.HelpAvailable {
 					t.Fatalf("default/help = %d/%t, want 2/true", got.DefaultItem, got.HelpAvailable)
+				}
+			},
+		},
+		{
+			name: "setup menu with Chinese text",
+			raw: proactive(t,
+				tlv.NewComprehension(tlvCommandDetails, []byte{0x12, byte(CommandSetupMenu), 0x00}),
+				tlv.NewComprehension(tlvDeviceIDs, []byte{byte(DeviceUICC), byte(DeviceTerminal)}),
+				tlv.NewComprehension(tlvAlphaID, []byte{0x80, 0x4e, 0x3b, 0x83, 0xdc, 0x53, 0x55}),
+				tlv.NewComprehension(tlvItem, []byte{0x01, 0x80, 0x4f, 0x60, 0x59, 0x7d}),
+			),
+			want: func(t *testing.T, cmd Command) {
+				got, ok := cmd.(SetupMenuCommand)
+				if !ok {
+					t.Fatalf("UnmarshalBinary() command type = %T, want SetupMenuCommand", cmd)
+				}
+				if got.Title == nil || got.Title.Value != "主菜单" {
+					t.Fatalf("Title = %+v, want 主菜单", got.Title)
+				}
+				if len(got.Items) != 1 || got.Items[0].Text.Value != "你好" {
+					t.Fatalf("Items = %+v, want 你好", got.Items)
+				}
+			},
+		},
+		{
+			name: "select item with compressed UCS2",
+			raw: proactive(t,
+				tlv.NewComprehension(tlvCommandDetails, []byte{0x13, byte(CommandSelectItem), 0x00}),
+				tlv.NewComprehension(tlvDeviceIDs, []byte{byte(DeviceUICC), byte(DeviceTerminal)}),
+				tlv.NewComprehension(tlvAlphaID, []byte{0x81, 0x03, 0x02, 'A', 0x80, 0x81}),
+				tlv.NewComprehension(tlvItem, []byte{0x01, 0x82, 0x03, 0x4f, 0x00, 'A', 0xe0, 0xe1}),
+			),
+			want: func(t *testing.T, cmd Command) {
+				got, ok := cmd.(SelectItemCommand)
+				if !ok {
+					t.Fatalf("UnmarshalBinary() command type = %T, want SelectItemCommand", cmd)
+				}
+				if got.Title == nil || got.Title.Value != "AĀā" {
+					t.Fatalf("Title = %+v, want AĀā", got.Title)
+				}
+				if len(got.Items) != 1 || got.Items[0].Text.Value != "A你佡" {
+					t.Fatalf("Items = %+v, want A你佡", got.Items)
 				}
 			},
 		},
@@ -120,7 +162,7 @@ func TestProactiveCommandUnmarshalBinary(t *testing.T) {
 				if got.RemoteEntityAddress == nil || got.RemoteEntityAddress.Coding != 0 || !bytes.Equal(got.RemoteEntityAddress.Address, []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55}) {
 					t.Fatalf("remote entity = %+v, want IEEE address", got.RemoteEntityAddress)
 				}
-				if got.Login == nil || got.Login.String != "user" {
+				if got.Login == nil || got.Login.Value != "user" {
 					t.Fatalf("login = %+v, want user", got.Login)
 				}
 				if !got.Immediate || !got.AutomaticReconnection || !got.Background || !got.DNSServerRequest {
@@ -249,6 +291,23 @@ func TestProactiveCommandUnmarshalBinary(t *testing.T) {
 				}
 				if got.ResultCode() != ResultRequiredValuesMissing {
 					t.Fatalf("ResultCode() = 0x%02X, want 0x%02X", got.ResultCode(), ResultRequiredValuesMissing)
+				}
+			},
+		},
+		{
+			name: "invalid text encoding becomes malformed command",
+			raw: proactive(t,
+				tlv.NewComprehension(tlvCommandDetails, []byte{0x14, byte(CommandDisplayText), 0x00}),
+				tlv.NewComprehension(tlvDeviceIDs, []byte{byte(DeviceUICC), byte(DeviceDisplay)}),
+				tlv.NewComprehension(tlvTextString, []byte{0x0c, 'H', 'i'}),
+			),
+			want: func(t *testing.T, cmd Command) {
+				got, ok := cmd.(MalformedCommand)
+				if !ok {
+					t.Fatalf("UnmarshalBinary() command type = %T, want MalformedCommand", cmd)
+				}
+				if got.ResultCode() != ResultCommandDataNotUnderstood {
+					t.Fatalf("ResultCode() = 0x%02X, want 0x%02X", got.ResultCode(), ResultCommandDataNotUnderstood)
 				}
 			},
 		},

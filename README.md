@@ -390,12 +390,12 @@ if err != nil {
 
 return toolkit.Run(ctx, usim.STKCallbacks{
 	DisplayText: func(ctx context.Context, cmd stk.DisplayTextCommand) (stk.TerminalResponse, error) {
-		log.Print(cmd.Text.String)
+		log.Print(cmd.Text.Value)
 		return stk.OK(), nil
 	},
 	SetupMenu: func(ctx context.Context, cmd stk.SetupMenuCommand) (stk.TerminalResponse, error) {
 		for _, item := range cmd.Items {
-			log.Printf("%d %s", item.Identifier, item.Text.String)
+			log.Printf("%d %s", item.Identifier, item.Text.Value)
 		}
 		return stk.OK(), nil
 	},
@@ -437,7 +437,7 @@ The helper below implements that flow:
 ```go
 callbacks := usim.STKCallbacks{
 	DisplayText: func(ctx context.Context, cmd stk.DisplayTextCommand) (stk.TerminalResponse, error) {
-		log.Print(cmd.Text.String)
+		log.Print(cmd.Text.Value)
 		return stk.OK(), nil
 	},
 }

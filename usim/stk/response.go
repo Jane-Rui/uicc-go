@@ -11,7 +11,7 @@ import (
 type TerminalResponse struct {
 	Result            ResultCode
 	AdditionalInfo    []byte
-	Text              *Text
+	Text              *TextString
 	ItemIdentifier    *byte
 	Duration          *Duration
 	Language          string

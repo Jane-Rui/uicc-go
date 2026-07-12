@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/qcom/tlv"
 )
+
+const maxRecordContentLength = 255
 
 type RawFileAttributes struct {
 	FileSize    uint16
@@ -110,6 +113,43 @@ func (r *Reader) ReadRecord(ctx context.Context, req RecordRead) ([]byte, error)
 		return nil, errors.New("reading record file: read result TLV missing")
 	}
 	return decodeLengthPrefixedBytes(value)
+}
+
+func (r *Reader) WriteRecord(ctx context.Context, req RecordWrite) error {
+	if req.Record == 0 {
+		return errors.New("writing record file: record number is zero")
+	}
+	if len(req.Data) > maxRecordContentLength {
+		return fmt.Errorf("writing record file: content length %d exceeds QMI UIM limit %d", len(req.Data), maxRecordContentLength)
+	}
+
+	fileValue, err := putFileValue(req.File.Path)
+	if err != nil {
+		return fmt.Errorf("writing record file: %w", err)
+	}
+
+	recordValue := binary.LittleEndian.AppendUint16(nil, req.Record)
+	recordValue = binary.LittleEndian.AppendUint16(recordValue, uint16(len(req.Data)))
+	recordValue = append(recordValue, req.Data...)
+
+	resp, err := r.request(ctx, qcom.MessageWriteRecord, tlv.TLVs{
+		tlv.Bytes(0x01, putSessionValue(req.File.Session, req.File.AID)),
+		tlv.Bytes(0x02, fileValue),
+		tlv.Bytes(0x03, recordValue),
+	})
+	if err != nil {
+		return fmt.Errorf("writing record file: %w", err)
+	}
+	if err := resultOK(resp); err != nil {
+		return fmt.Errorf("writing record file: %w", err)
+	}
+	if _, ok := tlv.Value(resp.TLVs, 0x11); ok {
+		return errors.New("writing record file: response indication is not supported")
+	}
+	if err := cardError(resp.TLVs); err != nil {
+		return fmt.Errorf("writing record file: %w", err)
+	}
+	return nil
 }
 
 func (r *Reader) transparentResponse(

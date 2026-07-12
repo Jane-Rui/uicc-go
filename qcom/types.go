@@ -19,6 +19,7 @@ const (
 	ServiceCAT2    ServiceType = 0x0A // Card Application Toolkit service v2
 	ServiceUIM     ServiceType = 0x0B // UIM service
 	ServiceIMSS    ServiceType = 0x12 // IMS Settings service
+	ServiceWDA     ServiceType = 0x1A // Wireless Data Administrative service
 	ServiceIMSA    ServiceType = 0x21 // IMS Application service
 	ServiceCAT     ServiceType = 0xE0 // Card Application Toolkit service v1
 )
@@ -51,8 +52,13 @@ const (
 	MessageWDSLegacyBindMuxDataPort MessageID = 0x0089
 	MessageWDSBindMuxDataPort       MessageID = 0x00A2
 
+	// WDA service commands
+	MessageWDASetDataFormat MessageID = 0x0020
+	MessageWDAGetDataFormat MessageID = 0x0021
+
 	// DMS service commands
 	MessageDMSSetEventReport   MessageID = 0x0001
+	MessageDMSGetMSISDN        MessageID = 0x0024
 	MessageDMSGetOperatingMode MessageID = 0x002D
 	MessageDMSSetOperatingMode MessageID = 0x002E
 
@@ -72,6 +78,7 @@ const (
 	MessageReset                     MessageID = 0x0000
 	MessageReadTransparent           MessageID = 0x0020
 	MessageReadRecord                MessageID = 0x0021
+	MessageWriteRecord               MessageID = 0x0023
 	MessageGetFileAttributes         MessageID = 0x0024
 	MessageRefreshRegister           MessageID = 0x002A
 	MessageRefreshComplete           MessageID = 0x002C
@@ -144,27 +151,120 @@ const (
 	WDSSIOPortA2MuxRMNET7
 )
 
-// WDSDataEndpointType identifies the physical data transport endpoint.
-type WDSDataEndpointType uint32
+// DataEndpointType identifies the physical data transport endpoint.
+type DataEndpointType uint32
 
 const (
-	WDSDataEndpointReserved WDSDataEndpointType = iota
-	WDSDataEndpointHSIC
-	WDSDataEndpointHSUSB
-	WDSDataEndpointPCIe
-	WDSDataEndpointEmbedded
-	WDSDataEndpointBAMDMUX
+	DataEndpointReserved DataEndpointType = iota
+	DataEndpointHSIC
+	DataEndpointHSUSB
+	DataEndpointPCIe
+	DataEndpointEmbedded
+	DataEndpointBAMDMUX
 )
 
-// WDSDataEndpoint identifies a physical data channel exposed by the modem.
-type WDSDataEndpoint struct {
-	Type        WDSDataEndpointType
+// DataEndpoint identifies a physical data channel exposed by the modem.
+type DataEndpoint struct {
+	Type        DataEndpointType
 	InterfaceID uint32
+}
+
+// WDSDataEndpointType is kept for source compatibility.
+// Deprecated: use DataEndpointType.
+type WDSDataEndpointType = DataEndpointType
+
+const (
+	WDSDataEndpointReserved = DataEndpointReserved
+	WDSDataEndpointHSIC     = DataEndpointHSIC
+	WDSDataEndpointHSUSB    = DataEndpointHSUSB
+	WDSDataEndpointPCIe     = DataEndpointPCIe
+	WDSDataEndpointEmbedded = DataEndpointEmbedded
+	WDSDataEndpointBAMDMUX  = DataEndpointBAMDMUX
+)
+
+// WDSDataEndpoint is kept for source compatibility.
+// Deprecated: use DataEndpoint.
+type WDSDataEndpoint = DataEndpoint
+
+// WDALinkLayerProtocol identifies the frames exchanged on the modem data port.
+type WDALinkLayerProtocol uint32
+
+const (
+	WDALinkLayerEthernet WDALinkLayerProtocol = 0x01
+	WDALinkLayerRawIP    WDALinkLayerProtocol = 0x02
+)
+
+// WDAAggregationProtocol identifies a modem data aggregation format.
+type WDAAggregationProtocol uint32
+
+const (
+	WDAAggregationDisabled WDAAggregationProtocol = iota
+	WDAAggregationTLP
+	WDAAggregationQCNCM
+	WDAAggregationMBIM
+	WDAAggregationRNDIS
+	WDAAggregationQMAP
+	WDAAggregationQMAPv2
+	WDAAggregationQMAPv3
+)
+
+// WDAQoSHeaderFormat identifies the optional uplink QoS header layout.
+type WDAQoSHeaderFormat uint32
+
+const (
+	WDAQoSHeaderReserved WDAQoSHeaderFormat = iota
+	WDAQoSHeader6Bytes
+	WDAQoSHeader8Bytes
+)
+
+// WDADataFormatConfig selects fields for WDA Set Data Format.
+// Nil fields are omitted because every WDA data-format TLV is optional.
+type WDADataFormatConfig struct {
+	QoSEnabled                   *bool
+	LinkLayerProtocol            *WDALinkLayerProtocol
+	UplinkAggregation            *WDAAggregationProtocol
+	DownlinkAggregation          *WDAAggregationProtocol
+	NDPSignature                 *uint32
+	DownlinkMaxDatagrams         *uint32
+	DownlinkMaxSize              *uint32
+	Endpoint                     *DataEndpoint
+	QoSHeaderFormat              *WDAQoSHeaderFormat
+	DownlinkMinimumPadding       *uint32
+	TerminalEquipmentFlowControl *bool
+}
+
+// WDADataFormat contains data-format fields returned by the modem.
+// A Known flag distinguishes an absent optional TLV from a zero value.
+type WDADataFormat struct {
+	QoSEnabled                        bool
+	QoSEnabledKnown                   bool
+	LinkLayerProtocol                 WDALinkLayerProtocol
+	LinkLayerProtocolKnown            bool
+	UplinkAggregation                 WDAAggregationProtocol
+	UplinkAggregationKnown            bool
+	DownlinkAggregation               WDAAggregationProtocol
+	DownlinkAggregationKnown          bool
+	NDPSignature                      uint32
+	NDPSignatureKnown                 bool
+	DownlinkMaxDatagrams              uint32
+	DownlinkMaxDatagramsKnown         bool
+	DownlinkMaxSize                   uint32
+	DownlinkMaxSizeKnown              bool
+	UplinkMaxDatagrams                uint32
+	UplinkMaxDatagramsKnown           bool
+	UplinkMaxSize                     uint32
+	UplinkMaxSizeKnown                bool
+	QoSHeaderFormat                   WDAQoSHeaderFormat
+	QoSHeaderFormatKnown              bool
+	DownlinkMinimumPadding            uint32
+	DownlinkMinimumPaddingKnown       bool
+	TerminalEquipmentFlowControl      bool
+	TerminalEquipmentFlowControlKnown bool
 }
 
 // WDSMuxDataPort describes the logical data channel assigned to a WDS client.
 type WDSMuxDataPort struct {
-	Endpoint *WDSDataEndpoint
+	Endpoint *DataEndpoint
 	MuxID    uint8
 	Reversed bool
 }

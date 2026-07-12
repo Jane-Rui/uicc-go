@@ -14,14 +14,14 @@ var errReaderClosed = errors.New("QMI UIM client is closed")
 
 func (r *Reader) withServiceClient(ctx context.Context, service qcom.ServiceType, fn func(uint8) error) error {
 	r.mu.Lock()
-	transport := r.transport
-	closed := r.closed || transport == nil
-	r.mu.Unlock()
-	if closed {
+	if r.closed || r.transport == nil {
+		r.mu.Unlock()
 		return errReaderClosed
 	}
+	boundService, serviceBound := boundQMIService(r.transport)
+	r.mu.Unlock()
 
-	if boundService, ok := boundQMIService(transport); ok {
+	if serviceBound {
 		if boundService != service {
 			return fmt.Errorf("QMI transport is bound to service 0x%02X, want 0x%02X", boundService, service)
 		}
@@ -47,7 +47,7 @@ func (r *Reader) allocateClientID(ctx context.Context) error {
 		return errReaderClosed
 	}
 
-	clientID, err := r.allocateServiceClientID(ctx, qcom.ServiceUIM)
+	clientID, err := r.allocateServiceClientIDLocked(ctx, qcom.ServiceUIM)
 	if err != nil {
 		return err
 	}
@@ -56,6 +56,15 @@ func (r *Reader) allocateClientID(ctx context.Context) error {
 }
 
 func (r *Reader) allocateServiceClientID(ctx context.Context, service qcom.ServiceType) (uint8, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.transport == nil {
+		return 0, errReaderClosed
+	}
+	return r.allocateServiceClientIDLocked(ctx, service)
+}
+
+func (r *Reader) allocateServiceClientIDLocked(ctx context.Context, service qcom.ServiceType) (uint8, error) {
 	resp, err := r.sendRequest(ctx, qcom.ServiceControl, 0, qcom.MessageAllocateClientID, tlv.TLVs{
 		tlv.Uint(0x01, service),
 	}, DefaultRequestTimeout)
@@ -74,6 +83,15 @@ func (r *Reader) allocateServiceClientID(ctx context.Context, service qcom.Servi
 }
 
 func (r *Reader) releaseServiceClientID(ctx context.Context, service qcom.ServiceType, clientID uint8) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.transport == nil {
+		return errReaderClosed
+	}
+	return r.releaseServiceClientIDLocked(ctx, service, clientID)
+}
+
+func (r *Reader) releaseServiceClientIDLocked(ctx context.Context, service qcom.ServiceType, clientID uint8) error {
 	resp, err := r.sendRequest(ctx, qcom.ServiceControl, 0, qcom.MessageReleaseClientID, tlv.TLVs{
 		tlv.Bytes(0x01, []byte{byte(service), clientID}),
 	}, DefaultRequestTimeout)
@@ -148,4 +166,11 @@ func (r *Reader) sendRequest(
 		Timeout:       timeout,
 		TLVs:          tlvs,
 	})
+}
+
+func boolByte(v bool) byte {
+	if v {
+		return 1
+	}
+	return 0
 }

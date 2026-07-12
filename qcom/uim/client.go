@@ -63,11 +63,7 @@ func New(ctx context.Context, transport qcom.Transport, opts ...Option) (*Reader
 		transport: transport,
 		slot:      cfg.slot,
 	}
-	if service, ok := boundQMIService(transport); ok {
-		if service != qcom.ServiceUIM {
-			_ = transport.Close()
-			return nil, fmt.Errorf("creating QMI UIM client: transport is bound to service 0x%02X, want UIM service 0x%02X", service, qcom.ServiceUIM)
-		}
+	if _, ok := boundQMIService(transport); ok {
 		return reader, nil
 	}
 	if err := reader.allocateClientID(ctx); err != nil {
@@ -98,14 +94,14 @@ func (r *Reader) Close() error {
 		_, serviceBound := boundQMIService(transport)
 		if r.catClientID != 0 {
 			if !serviceBound {
-				releaseErr = r.releaseServiceClientID(ctx, r.catService, r.catClientID)
+				releaseErr = r.releaseServiceClientIDLocked(ctx, r.catService, r.catClientID)
 			}
 			r.catClientID = 0
 			r.catService = 0
 		}
 		if r.clientID != 0 {
 			if !serviceBound {
-				releaseErr = errors.Join(releaseErr, r.releaseServiceClientID(ctx, qcom.ServiceUIM, r.clientID))
+				releaseErr = errors.Join(releaseErr, r.releaseServiceClientIDLocked(ctx, qcom.ServiceUIM, r.clientID))
 			}
 			r.clientID = 0
 		}

@@ -81,7 +81,7 @@ func TestOpenIMSPDNBindsDataPortBeforeStartingNetwork(t *testing.T) {
 		{
 			name: "mux data port",
 			cfg: IMSPDNConfig{MuxDataPort: &qcom.WDSMuxDataPort{
-				Endpoint: &qcom.WDSDataEndpoint{Type: qcom.WDSDataEndpointBAMDMUX, InterfaceID: 1},
+				Endpoint: &qcom.DataEndpoint{Type: qcom.DataEndpointBAMDMUX, InterfaceID: 1},
 				MuxID:    2,
 			}},
 			wantMessageID: qcom.MessageWDSBindMuxDataPort,

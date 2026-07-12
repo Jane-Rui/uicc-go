@@ -45,8 +45,7 @@ type WDSBindMuxDataPortRequest struct {
 func (r WDSBindMuxDataPortRequest) Request() qcom.Request {
 	tlvs := make(tlv.TLVs, 0, 3)
 	if r.DataPort.Endpoint != nil {
-		endpoint := binary.LittleEndian.AppendUint32(nil, uint32(r.DataPort.Endpoint.Type))
-		endpoint = binary.LittleEndian.AppendUint32(endpoint, r.DataPort.Endpoint.InterfaceID)
+		endpoint, _ := r.DataPort.Endpoint.MarshalBinary() // Fixed-width endpoint encoding cannot fail.
 		tlvs = append(tlvs, tlv.Bytes(0x10, endpoint))
 	}
 	tlvs = append(tlvs, tlv.Uint(0x11, r.DataPort.MuxID))

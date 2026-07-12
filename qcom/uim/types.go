@@ -192,6 +192,12 @@ type RecordRead struct {
 	Length uint16
 }
 
+type RecordWrite struct {
+	File   File
+	Record uint16
+	Data   []byte
+}
+
 type AuthContext byte
 
 const (

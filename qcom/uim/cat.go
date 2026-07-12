@@ -33,7 +33,7 @@ func (r *Reader) catClient(ctx context.Context) (qcom.ServiceType, uint8, error)
 		r.catService = service
 	}
 
-	clientID, err := r.allocateServiceClientID(ctx, r.catService)
+	clientID, err := r.allocateServiceClientIDLocked(ctx, r.catService)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -52,7 +52,7 @@ func (r *Reader) releaseCATClient(ctx context.Context, service qcom.ServiceType,
 	}
 
 	if _, serviceBound := boundQMIService(r.transport); !serviceBound {
-		if err := r.releaseServiceClientID(ctx, service, clientID); err != nil {
+		if err := r.releaseServiceClientIDLocked(ctx, service, clientID); err != nil {
 			return err
 		}
 	}

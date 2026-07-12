@@ -400,12 +400,6 @@ func eventReportErrorMask(tlvs tlv.TLVs, tag byte) (uint32, bool, error) {
 	return binary.LittleEndian.Uint32(value), true, nil
 }
 
-func boolByte(v bool) byte {
-	if v {
-		return 1
-	}
-	return 0
-}
 
 func (r *Reader) sendCATEnvelope(ctx context.Context, envelope []byte, envType uint16) (EnvelopeResponse, error) {
 	if len(envelope) < 2 {

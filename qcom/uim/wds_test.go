@@ -158,8 +158,8 @@ func TestWDSBindMuxDataPortRequestEncoding(t *testing.T) {
 		{
 			name: "endpoint and mux",
 			dataPort: qcom.WDSMuxDataPort{
-				Endpoint: &qcom.WDSDataEndpoint{
-					Type:        qcom.WDSDataEndpointBAMDMUX,
+				Endpoint: &qcom.DataEndpoint{
+					Type:        qcom.DataEndpointBAMDMUX,
 					InterfaceID: 1,
 				},
 				MuxID: 2,
@@ -175,7 +175,7 @@ func TestWDSBindMuxDataPortRequestEncoding(t *testing.T) {
 		{
 			name: "reversed port",
 			dataPort: qcom.WDSMuxDataPort{
-				Endpoint: &qcom.WDSDataEndpoint{Type: qcom.WDSDataEndpointHSUSB, InterfaceID: 4},
+				Endpoint: &qcom.DataEndpoint{Type: qcom.DataEndpointHSUSB, InterfaceID: 4},
 				MuxID:    3,
 				Reversed: true,
 			},

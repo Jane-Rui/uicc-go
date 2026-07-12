@@ -41,9 +41,12 @@ func (r *QCOM) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSession
 		return nil, err
 	}
 	session, err := r.reader.OpenIMSPDN(ctx, uim.IMSPDNConfig{
-		APN:            normalized.APN,
-		IPFamily:       qcomIPFamilyForPDNType(normalized.PDNType),
-		RequestTimeout: normalized.RequestTimeout,
+		APN:               normalized.APN,
+		IPFamily:          qcomIPFamilyForPDNType(normalized.PDNType),
+		ProfileIndex:      normalized.ProfileIndex,
+		RequestTimeout:    normalized.RequestTimeout,
+		MuxDataPort:       normalized.MuxDataPort,
+		LegacyMuxDataPort: normalized.LegacyMuxDataPort,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("opening IMS PDN: %w", err)
@@ -337,8 +340,8 @@ func (r *QCOM) files(file usimcard.FileRef) ([]uim.File, error) {
 			return nil, err
 		}
 		return []uim.File{
-			{Session: cardSession, AID: slices.Clone(file.AID), Path: path},
 			{Session: nonProvisioningSession, AID: slices.Clone(file.AID), Path: path},
+			{Session: cardSession, Path: path},
 		}, nil
 	}
 	if hasPrefix(file.AID, qcomUSIMAIDPrefix) {
@@ -393,10 +396,7 @@ func (r *QCOM) authRequests(req usimcard.AuthenticateRequest) ([]uim.Authenticat
 
 func qcomFilePath(file usimcard.FileRef) []byte {
 	if len(file.AID) != 0 {
-		if hasPrefix(file.AID, qcomUSIMAIDPrefix) {
-			return joinBytes(masterFile, qcomCurrentADF, file.Path)
-		}
-		return slices.Clone(file.Path)
+		return joinBytes(masterFile, qcomCurrentADF, file.Path)
 	}
 	if hasPrefix(file.Path, masterFile) {
 		return slices.Clone(file.Path)

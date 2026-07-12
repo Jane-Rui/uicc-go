@@ -11,6 +11,57 @@ import (
 	"github.com/damonto/uicc-go/qcom/tlv"
 )
 
+// WDSLegacyBindMuxDataPortRequest encodes legacy QMI WDS Bind Data Port.
+type WDSLegacyBindMuxDataPortRequest struct {
+	ClientID      uint8
+	TransactionID uint16
+	Timeout       time.Duration
+	DataPort      qcom.WDSSIOPort
+}
+
+// Request binds the WDS client to a legacy SIO data port.
+func (r WDSLegacyBindMuxDataPortRequest) Request() qcom.Request {
+	return qcom.Request{
+		Service:       qcom.ServiceWDS,
+		ClientID:      r.ClientID,
+		TransactionID: r.TransactionID,
+		MessageID:     qcom.MessageWDSLegacyBindMuxDataPort,
+		Timeout:       r.Timeout,
+		TLVs: tlv.TLVs{
+			tlv.Uint(0x01, uint16(r.DataPort)),
+		},
+	}
+}
+
+// WDSBindMuxDataPortRequest encodes QMI WDS Bind Mux Data Port.
+type WDSBindMuxDataPortRequest struct {
+	ClientID      uint8
+	TransactionID uint16
+	Timeout       time.Duration
+	DataPort      qcom.WDSMuxDataPort
+}
+
+// Request binds the WDS client to a logical data channel.
+func (r WDSBindMuxDataPortRequest) Request() qcom.Request {
+	tlvs := make(tlv.TLVs, 0, 3)
+	if r.DataPort.Endpoint != nil {
+		endpoint, _ := r.DataPort.Endpoint.MarshalBinary() // Fixed-width endpoint encoding cannot fail.
+		tlvs = append(tlvs, tlv.Bytes(0x10, endpoint))
+	}
+	tlvs = append(tlvs, tlv.Uint(0x11, r.DataPort.MuxID))
+	if r.DataPort.Reversed {
+		tlvs = append(tlvs, tlv.Uint(0x12, uint8(1)))
+	}
+	return qcom.Request{
+		Service:       qcom.ServiceWDS,
+		ClientID:      r.ClientID,
+		TransactionID: r.TransactionID,
+		MessageID:     qcom.MessageWDSBindMuxDataPort,
+		Timeout:       r.Timeout,
+		TLVs:          tlvs,
+	}
+}
+
 // WDSStartNetworkInterfaceRequest encodes QMI WDS Start Network Interface.
 type WDSStartNetworkInterfaceRequest struct {
 	ClientID             uint8
@@ -19,21 +70,26 @@ type WDSStartNetworkInterfaceRequest struct {
 	APN                  string
 	IPFamily             qcom.WDSIPFamily
 	TechnologyPreference qcom.WDSTechnologyPreference
+	ProfileIndex3GPP     uint8
 }
 
 // Request converts the high-level request fields into a QMI WDS request.
 func (r WDSStartNetworkInterfaceRequest) Request() qcom.Request {
+	tlvs := tlv.TLVs{
+		tlv.Bytes(0x14, []byte(r.APN)),
+		tlv.Uint(0x19, uint8(r.IPFamily)),
+		tlv.Uint(0x30, uint8(r.TechnologyPreference)),
+	}
+	if r.ProfileIndex3GPP != 0 {
+		tlvs = append(tlvs, tlv.Uint(0x31, r.ProfileIndex3GPP))
+	}
 	return qcom.Request{
 		Service:       qcom.ServiceWDS,
 		ClientID:      r.ClientID,
 		TransactionID: r.TransactionID,
 		MessageID:     qcom.MessageWDSStartNetworkInterface,
 		Timeout:       r.Timeout,
-		TLVs: tlv.TLVs{
-			tlv.Bytes(0x14, []byte(r.APN)),
-			tlv.Uint(0x19, uint8(r.IPFamily)),
-			tlv.Uint(0x30, uint8(r.TechnologyPreference)),
-		},
+		TLVs:          tlvs,
 	}
 }
 

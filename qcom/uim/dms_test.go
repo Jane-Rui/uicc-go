@@ -19,6 +19,15 @@ func TestDMSRequestEncoding(t *testing.T) {
 		wantValue     []byte
 	}{
 		{
+			name: "get MSISDN",
+			req: DMSGetMSISDNRequest{
+				ClientID:      6,
+				TransactionID: 8,
+				Timeout:       2 * time.Second,
+			}.Request(),
+			wantMessageID: qcom.MessageDMSGetMSISDN,
+		},
+		{
 			name: "get operating mode",
 			req: DMSGetOperatingModeRequest{
 				ClientID:      7,
@@ -74,6 +83,166 @@ func TestDMSRequestEncoding(t *testing.T) {
 			}
 			if !bytes.Equal(value, tt.wantValue) {
 				t.Fatalf("TLV 0x%02X = % X, want % X", tt.wantTLV, value, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestDMSGetMSISDNResponseUnmarshalTLVs(t *testing.T) {
+	tests := []struct {
+		name    string
+		tlvs    tlv.TLVs
+		want    DMSGetMSISDNResponse
+		wantErr bool
+	}{
+		{
+			name: "voice number only",
+			tlvs: tlv.TLVs{tlv.Bytes(dmsTLVVoiceNumber, []byte("+8613800138000"))},
+			want: DMSGetMSISDNResponse{VoiceNumber: "+8613800138000"},
+		},
+		{
+			name: "all identifiers",
+			tlvs: tlv.TLVs{
+				tlv.Bytes(dmsTLVVoiceNumber, []byte("+15551234567")),
+				tlv.Bytes(dmsTLVMobileIDNumber, []byte("5551234567")),
+				tlv.Bytes(dmsTLVIMSI, []byte("310260123456789")),
+			},
+			want: DMSGetMSISDNResponse{
+				VoiceNumber:    "+15551234567",
+				MobileIDNumber: "5551234567",
+				IMSI:           "310260123456789",
+			},
+		},
+		{name: "empty voice number", tlvs: tlv.TLVs{tlv.Bytes(dmsTLVVoiceNumber, nil)}},
+		{name: "missing voice number", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got DMSGetMSISDNResponse
+			err := got.UnmarshalTLVs(tt.tlvs)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("UnmarshalTLVs() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UnmarshalTLVs() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("UnmarshalTLVs() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReaderMSISDN(t *testing.T) {
+	tests := []struct {
+		name string
+		tlvs tlv.TLVs
+		want DMSGetMSISDNResponse
+	}{
+		{
+			name: "voice number",
+			tlvs: tlv.TLVs{tlv.Bytes(dmsTLVVoiceNumber, []byte("+8613800138000"))},
+			want: DMSGetMSISDNResponse{VoiceNumber: "+8613800138000"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{
+				t: t,
+				calls: []transportCall{
+					{
+						check: func(req qcom.Request) {
+							if req.Service != qcom.ServiceControl || req.MessageID != qcom.MessageAllocateClientID {
+								t.Fatalf("allocate request = service 0x%02X message 0x%04X", req.Service, req.MessageID)
+							}
+							assertTLV(t, req.TLVs, 0x01, []byte{byte(qcom.ServiceDMS)})
+						},
+						resp: successResponse(qcom.MessageAllocateClientID, tlv.Bytes(0x01, []byte{byte(qcom.ServiceDMS), 5})),
+					},
+					{
+						check: func(req qcom.Request) {
+							if req.Service != qcom.ServiceDMS || req.ClientID != 5 || req.MessageID != qcom.MessageDMSGetMSISDN {
+								t.Fatalf("unexpected DMS request: %+v", req)
+							}
+							if len(req.TLVs) != 0 {
+								t.Fatalf("TLVs len = %d, want 0", len(req.TLVs))
+							}
+						},
+						resp: successResponse(qcom.MessageDMSGetMSISDN, tt.tlvs...),
+					},
+					{
+						check: func(req qcom.Request) {
+							if req.Service != qcom.ServiceControl || req.MessageID != qcom.MessageReleaseClientID {
+								t.Fatalf("release request = service 0x%02X message 0x%04X", req.Service, req.MessageID)
+							}
+							assertTLV(t, req.TLVs, 0x01, []byte{byte(qcom.ServiceDMS), 5})
+						},
+						resp: successResponse(qcom.MessageReleaseClientID),
+					},
+				},
+			}
+			reader := &Reader{transport: transport, slot: 1}
+
+			got, err := reader.MSISDN(context.Background())
+			if err != nil {
+				t.Fatalf("MSISDN() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("MSISDN() = %+v, want %+v", got, tt.want)
+			}
+			if got := transport.callCount(); got != 3 {
+				t.Fatalf("Do() calls = %d, want 3", got)
+			}
+		})
+	}
+}
+
+func TestReaderMSISDNUsesBoundDMSService(t *testing.T) {
+	tests := []struct {
+		name string
+		want DMSGetMSISDNResponse
+	}{
+		{
+			name: "QRTR-style DMS transport",
+			want: DMSGetMSISDNResponse{VoiceNumber: "+8613800138000"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &serviceBoundFakeTransport{
+				fakeTransport: fakeTransport{
+					t: t,
+					calls: []transportCall{{
+						check: func(req qcom.Request) {
+							if req.Service != qcom.ServiceDMS || req.ClientID != 0 || req.MessageID != qcom.MessageDMSGetMSISDN {
+								t.Fatalf("unexpected DMS request: %+v", req)
+							}
+						},
+						resp: successResponse(qcom.MessageDMSGetMSISDN, tlv.Bytes(dmsTLVVoiceNumber, []byte(tt.want.VoiceNumber))),
+					}},
+				},
+				service: qcom.ServiceDMS,
+			}
+			reader, err := New(context.Background(), transport)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			got, err := reader.MSISDN(context.Background())
+			if err != nil {
+				t.Fatalf("MSISDN() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("MSISDN() = %+v, want %+v", got, tt.want)
+			}
+			if got := transport.callCount(); got != 1 {
+				t.Fatalf("Do() calls = %d, want 1", got)
 			}
 		})
 	}

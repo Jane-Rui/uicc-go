@@ -71,6 +71,34 @@ func (t *serviceBoundFakeTransport) QMIService() qcom.ServiceType {
 	return t.service
 }
 
+type lockCheckingTransport struct {
+	t      *testing.T
+	reader *Reader
+	calls  int
+}
+
+func (t *lockCheckingTransport) Do(_ context.Context, req qcom.Request) (qcom.Response, error) {
+	t.t.Helper()
+	if t.reader.mu.TryLock() {
+		t.reader.mu.Unlock()
+		t.t.Fatal("Reader mutex is not held while sending QMI request")
+	}
+	t.calls++
+	switch {
+	case req.Service == qcom.ServiceControl && req.MessageID == qcom.MessageAllocateClientID:
+		return successResponse(req.MessageID, tlv.Bytes(0x01, []byte{byte(qcom.ServiceDMS), 5})), nil
+	case req.Service == qcom.ServiceDMS && req.MessageID == qcom.MessageDMSGetMSISDN:
+		return successResponse(req.MessageID, tlv.Bytes(dmsTLVVoiceNumber, []byte("+8613800138000"))), nil
+	case req.Service == qcom.ServiceControl && req.MessageID == qcom.MessageReleaseClientID:
+		return successResponse(req.MessageID), nil
+	default:
+		t.t.Fatalf("unexpected QMI request: %+v", req)
+		return qcom.Response{}, nil
+	}
+}
+
+func (t *lockCheckingTransport) Close() error { return nil }
+
 func TestNewSkipsClientAllocationForServiceBoundTransport(t *testing.T) {
 	transport := &serviceBoundFakeTransport{
 		fakeTransport: fakeTransport{t: t},
@@ -95,18 +123,54 @@ func TestNewSkipsClientAllocationForServiceBoundTransport(t *testing.T) {
 	}
 }
 
-func TestNewRejectsWrongServiceBoundTransport(t *testing.T) {
-	transport := &serviceBoundFakeTransport{
-		fakeTransport: fakeTransport{t: t},
-		service:       qcom.ServiceCAT2,
+func TestNewAcceptsServiceBoundTransport(t *testing.T) {
+	tests := []struct {
+		name    string
+		service qcom.ServiceType
+	}{
+		{name: "UIM", service: qcom.ServiceUIM},
+		{name: "DMS", service: qcom.ServiceDMS},
+		{name: "WDA", service: qcom.ServiceWDA},
 	}
 
-	reader, err := New(context.Background(), transport, WithSlot(1))
-	if err == nil {
-		t.Fatal("New() error = nil, want service mismatch")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &serviceBoundFakeTransport{
+				fakeTransport: fakeTransport{t: t},
+				service:       tt.service,
+			}
+
+			reader, err := New(context.Background(), transport, WithSlot(1))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if reader == nil {
+				t.Fatal("New() reader = nil")
+			}
+		})
 	}
-	if reader != nil {
-		t.Fatalf("New() reader = %#v, want nil", reader)
+}
+
+func TestWithServiceClientSerializesEverySend(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "DMS allocate request release"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &lockCheckingTransport{t: t}
+			reader := &Reader{transport: transport, slot: 1}
+			transport.reader = reader
+
+			if _, err := reader.MSISDN(context.Background()); err != nil {
+				t.Fatalf("MSISDN() error = %v", err)
+			}
+			if transport.calls != 3 {
+				t.Fatalf("Do() calls = %d, want 3", transport.calls)
+			}
+		})
 	}
 }
 

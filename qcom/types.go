@@ -18,6 +18,8 @@ const (
 	ServiceNAS     ServiceType = 0x03 // Network Access Service
 	ServiceCAT2    ServiceType = 0x0A // Card Application Toolkit service v2
 	ServiceUIM     ServiceType = 0x0B // UIM service
+	ServiceIMSS    ServiceType = 0x12 // IMS Settings service
+	ServiceWDA     ServiceType = 0x1A // Wireless Data Administrative service
 	ServiceIMSA    ServiceType = 0x21 // IMS Application service
 	ServiceCAT     ServiceType = 0xE0 // Card Application Toolkit service v1
 )
@@ -44,24 +46,39 @@ const (
 	// WDS service commands
 	MessageWDSStartNetworkInterface MessageID = 0x0020
 	MessageWDSStopNetworkInterface  MessageID = 0x0021
+	MessageWDSGetProfileList        MessageID = 0x002A
+	MessageWDSGetProfileSettings    MessageID = 0x002B
 	MessageWDSGetRuntimeSettings    MessageID = 0x002D
+	MessageWDSLegacyBindMuxDataPort MessageID = 0x0089
+	MessageWDSBindMuxDataPort       MessageID = 0x00A2
+
+	// WDA service commands
+	MessageWDASetDataFormat MessageID = 0x0020
+	MessageWDAGetDataFormat MessageID = 0x0021
 
 	// DMS service commands
 	MessageDMSSetEventReport   MessageID = 0x0001
+	MessageDMSGetMSISDN        MessageID = 0x0024
 	MessageDMSGetOperatingMode MessageID = 0x002D
 	MessageDMSSetOperatingMode MessageID = 0x002E
 
 	// NAS service commands
-	MessageNASGetSysInfo MessageID = 0x004D
+	MessageNASGetServingSystem MessageID = 0x0024
+	MessageNASGetSysInfo       MessageID = 0x004D
 
 	// IMSA service commands
 	MessageIMSAGetRegistrationStatus MessageID = 0x0020
 	MessageIMSAGetServiceStatus      MessageID = 0x0021
 
+	// IMSS service commands
+	MessageIMSSSetRegistrationManagerConfig MessageID = 0x0021
+	MessageIMSSGetRegistrationManagerConfig MessageID = 0x0026
+
 	// UIM service commands
 	MessageReset                     MessageID = 0x0000
 	MessageReadTransparent           MessageID = 0x0020
 	MessageReadRecord                MessageID = 0x0021
+	MessageWriteRecord               MessageID = 0x0023
 	MessageGetFileAttributes         MessageID = 0x0024
 	MessageRefreshRegister           MessageID = 0x002A
 	MessageRefreshComplete           MessageID = 0x002C
@@ -119,6 +136,176 @@ type WDSTechnologyPreference uint8
 const (
 	WDSTechnologyPreference3GPP WDSTechnologyPreference = 1
 )
+
+// WDSSIOPort identifies a legacy modem SIO data port.
+type WDSSIOPort uint16
+
+const (
+	WDSSIOPortA2MuxRMNET0 WDSSIOPort = 0x0E04 + iota
+	WDSSIOPortA2MuxRMNET1
+	WDSSIOPortA2MuxRMNET2
+	WDSSIOPortA2MuxRMNET3
+	WDSSIOPortA2MuxRMNET4
+	WDSSIOPortA2MuxRMNET5
+	WDSSIOPortA2MuxRMNET6
+	WDSSIOPortA2MuxRMNET7
+)
+
+// DataEndpointType identifies the physical data transport endpoint.
+type DataEndpointType uint32
+
+const (
+	DataEndpointReserved DataEndpointType = iota
+	DataEndpointHSIC
+	DataEndpointHSUSB
+	DataEndpointPCIe
+	DataEndpointEmbedded
+	DataEndpointBAMDMUX
+)
+
+// DataEndpoint identifies a physical data channel exposed by the modem.
+type DataEndpoint struct {
+	Type        DataEndpointType
+	InterfaceID uint32
+}
+
+// WDSDataEndpointType is kept for source compatibility.
+// Deprecated: use DataEndpointType.
+type WDSDataEndpointType = DataEndpointType
+
+const (
+	WDSDataEndpointReserved = DataEndpointReserved
+	WDSDataEndpointHSIC     = DataEndpointHSIC
+	WDSDataEndpointHSUSB    = DataEndpointHSUSB
+	WDSDataEndpointPCIe     = DataEndpointPCIe
+	WDSDataEndpointEmbedded = DataEndpointEmbedded
+	WDSDataEndpointBAMDMUX  = DataEndpointBAMDMUX
+)
+
+// WDSDataEndpoint is kept for source compatibility.
+// Deprecated: use DataEndpoint.
+type WDSDataEndpoint = DataEndpoint
+
+// WDALinkLayerProtocol identifies the frames exchanged on the modem data port.
+type WDALinkLayerProtocol uint32
+
+const (
+	WDALinkLayerEthernet WDALinkLayerProtocol = 0x01
+	WDALinkLayerRawIP    WDALinkLayerProtocol = 0x02
+)
+
+// WDAAggregationProtocol identifies a modem data aggregation format.
+type WDAAggregationProtocol uint32
+
+const (
+	WDAAggregationDisabled WDAAggregationProtocol = iota
+	WDAAggregationTLP
+	WDAAggregationQCNCM
+	WDAAggregationMBIM
+	WDAAggregationRNDIS
+	WDAAggregationQMAP
+	WDAAggregationQMAPv2
+	WDAAggregationQMAPv3
+)
+
+// WDAQoSHeaderFormat identifies the optional uplink QoS header layout.
+type WDAQoSHeaderFormat uint32
+
+const (
+	WDAQoSHeaderReserved WDAQoSHeaderFormat = iota
+	WDAQoSHeader6Bytes
+	WDAQoSHeader8Bytes
+)
+
+// WDADataFormatConfig selects fields for WDA Set Data Format.
+// Nil fields are omitted because every WDA data-format TLV is optional.
+type WDADataFormatConfig struct {
+	QoSEnabled                   *bool
+	LinkLayerProtocol            *WDALinkLayerProtocol
+	UplinkAggregation            *WDAAggregationProtocol
+	DownlinkAggregation          *WDAAggregationProtocol
+	NDPSignature                 *uint32
+	DownlinkMaxDatagrams         *uint32
+	DownlinkMaxSize              *uint32
+	Endpoint                     *DataEndpoint
+	QoSHeaderFormat              *WDAQoSHeaderFormat
+	DownlinkMinimumPadding       *uint32
+	TerminalEquipmentFlowControl *bool
+}
+
+// WDADataFormat contains data-format fields returned by the modem.
+// A Known flag distinguishes an absent optional TLV from a zero value.
+type WDADataFormat struct {
+	QoSEnabled                        bool
+	QoSEnabledKnown                   bool
+	LinkLayerProtocol                 WDALinkLayerProtocol
+	LinkLayerProtocolKnown            bool
+	UplinkAggregation                 WDAAggregationProtocol
+	UplinkAggregationKnown            bool
+	DownlinkAggregation               WDAAggregationProtocol
+	DownlinkAggregationKnown          bool
+	NDPSignature                      uint32
+	NDPSignatureKnown                 bool
+	DownlinkMaxDatagrams              uint32
+	DownlinkMaxDatagramsKnown         bool
+	DownlinkMaxSize                   uint32
+	DownlinkMaxSizeKnown              bool
+	UplinkMaxDatagrams                uint32
+	UplinkMaxDatagramsKnown           bool
+	UplinkMaxSize                     uint32
+	UplinkMaxSizeKnown                bool
+	QoSHeaderFormat                   WDAQoSHeaderFormat
+	QoSHeaderFormatKnown              bool
+	DownlinkMinimumPadding            uint32
+	DownlinkMinimumPaddingKnown       bool
+	TerminalEquipmentFlowControl      bool
+	TerminalEquipmentFlowControlKnown bool
+}
+
+// WDSMuxDataPort describes the logical data channel assigned to a WDS client.
+type WDSMuxDataPort struct {
+	Endpoint *DataEndpoint
+	MuxID    uint8
+	Reversed bool
+}
+
+// WDSProfileType identifies a modem data-profile technology family.
+type WDSProfileType uint8
+
+const (
+	WDSProfileType3GPP WDSProfileType = iota
+	WDSProfileType3GPP2
+	WDSProfileTypeEPC
+)
+
+// WDSProfileID identifies a stored modem data profile.
+type WDSProfileID struct {
+	Type  WDSProfileType
+	Index uint8
+}
+
+// WDSProfile is one entry returned by WDS Get Profile List.
+type WDSProfile struct {
+	ID   WDSProfileID
+	Name string
+}
+
+// WDSProfileSettings contains selected optional WDS profile fields.
+type WDSProfileSettings struct {
+	ID WDSProfileID
+
+	Name      string
+	NameKnown bool
+	APN       string
+	APNKnown  bool
+
+	PCSCFUsingPCO       bool
+	PCSCFUsingPCOKnown  bool
+	PCSCFUsingDHCP      bool
+	PCSCFUsingDHCPKnown bool
+	IMCN                bool
+	IMCNKnown           bool
+}
 
 // WDSCallEndReason is the basic WDS call end reason returned by start-network.
 type WDSCallEndReason uint16
@@ -191,6 +378,57 @@ const (
 type NASSysInfo struct {
 	VoPSKnown     bool
 	VoPSSupported bool
+}
+
+// NASRegistrationState is the network registration state reported by NAS.
+type NASRegistrationState uint8
+
+const (
+	NASRegistrationNotRegistered NASRegistrationState = iota
+	NASRegistrationRegistered
+	NASRegistrationSearching
+	NASRegistrationDenied
+	NASRegistrationUnknown
+)
+
+// NASAttachState is a circuit-switched or packet-switched attach state.
+type NASAttachState uint8
+
+const (
+	NASAttachUnknown NASAttachState = iota
+	NASAttachAttached
+	NASAttachDetached
+)
+
+// NASSelectedNetwork identifies the selected network family.
+type NASSelectedNetwork uint8
+
+const (
+	NASSelectedNetworkUnknown NASSelectedNetwork = iota
+	NASSelectedNetwork3GPP2
+	NASSelectedNetwork3GPP
+)
+
+// NASRadioInterface identifies a radio interface currently in use.
+type NASRadioInterface uint8
+
+const (
+	NASRadioInterfaceNoService NASRadioInterface = 0
+	NASRadioInterfaceCDMA1X    NASRadioInterface = 1
+	NASRadioInterfaceCDMAEVDO  NASRadioInterface = 2
+	NASRadioInterfaceAMPS      NASRadioInterface = 3
+	NASRadioInterfaceGSM       NASRadioInterface = 4
+	NASRadioInterfaceUMTS      NASRadioInterface = 5
+	NASRadioInterfaceLTE       NASRadioInterface = 8
+)
+
+// NASServingSystem contains the fields from NAS Get Serving System.
+type NASServingSystem struct {
+	RegistrationState NASRegistrationState
+	CSAttachState     NASAttachState
+	PSAttachState     NASAttachState
+	SelectedNetwork   NASSelectedNetwork
+	RadioInterfaces   []NASRadioInterface
 }
 
 // IMSRegistrationStatus is the QMI IMSA registration state.

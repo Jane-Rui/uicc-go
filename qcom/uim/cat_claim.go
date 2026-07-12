@@ -153,7 +153,7 @@ func (c *CAT) releaseServiceClientID(ctx context.Context, service qcom.ServiceTy
 	if c.reader.closed || c.reader.transport == nil {
 		return errReaderClosed
 	}
-	return c.reader.releaseServiceClientID(ctx, service, clientID)
+	return c.reader.releaseServiceClientIDLocked(ctx, service, clientID)
 }
 
 func (c *CAT) trySetEventReport(ctx context.Context, service qcom.ServiceType, clientID uint8, rawMask, fullMask uint32) (bool, bool, error) {

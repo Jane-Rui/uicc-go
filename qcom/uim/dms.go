@@ -13,7 +13,28 @@ import (
 const (
 	dmsTLVOperatingMode       = 0x01
 	dmsTLVReportOperatingMode = 0x14
+	dmsTLVVoiceNumber         = 0x01
+	dmsTLVMobileIDNumber      = 0x10
+	dmsTLVIMSI                = 0x11
 )
+
+// DMSGetMSISDNRequest encodes QMI DMS Get MSISDN.
+type DMSGetMSISDNRequest struct {
+	ClientID      uint8
+	TransactionID uint16
+	Timeout       time.Duration
+}
+
+// Request converts the request into a QMI DMS request.
+func (r DMSGetMSISDNRequest) Request() qcom.Request {
+	return qcom.Request{
+		Service:       qcom.ServiceDMS,
+		ClientID:      r.ClientID,
+		TransactionID: r.TransactionID,
+		MessageID:     qcom.MessageDMSGetMSISDN,
+		Timeout:       r.Timeout,
+	}
+}
 
 // DMSGetOperatingModeRequest encodes QMI DMS Get Operating Mode.
 type DMSGetOperatingModeRequest struct {
@@ -131,32 +152,51 @@ func (r *Reader) SetOperatingMode(ctx context.Context, mode qcom.DMSOperatingMod
 	return nil
 }
 
-func (r *Reader) withServiceClient(ctx context.Context, service qcom.ServiceType, fn func(uint8) error) error {
-	r.mu.Lock()
-	transport := r.transport
-	closed := r.closed || transport == nil
-	r.mu.Unlock()
-	if closed {
-		return errReaderClosed
-	}
-
-	if boundService, ok := boundQMIService(transport); ok {
-		if boundService != service {
-			return fmt.Errorf("QMI transport is bound to service 0x%02X, want 0x%02X", boundService, service)
+// MSISDN returns the voice number and related subscriber identifiers reported by QMI DMS.
+func (r *Reader) MSISDN(ctx context.Context) (DMSGetMSISDNResponse, error) {
+	var result DMSGetMSISDNResponse
+	err := r.withServiceClient(ctx, qcom.ServiceDMS, func(clientID uint8) error {
+		req := DMSGetMSISDNRequest{
+			ClientID: clientID,
+			Timeout:  DefaultRequestTimeout,
+		}.Request()
+		resp, err := r.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+		if err != nil {
+			return err
 		}
-		return fn(0)
+		if err := resultOK(resp); err != nil {
+			return err
+		}
+		return result.UnmarshalTLVs(resp.TLVs)
+	})
+	if err != nil {
+		return DMSGetMSISDNResponse{}, fmt.Errorf("querying QMI DMS MSISDN: %w", err)
 	}
+	return result, nil
+}
 
-	clientID, err := r.allocateServiceClientID(ctx, service)
-	if err != nil {
-		return err
+// DMSGetMSISDNResponse is the parsed QMI DMS Get MSISDN response.
+type DMSGetMSISDNResponse struct {
+	VoiceNumber    string
+	MobileIDNumber string
+	IMSI           string
+}
+
+// UnmarshalTLVs parses QMI DMS Get MSISDN response TLVs.
+func (r *DMSGetMSISDNResponse) UnmarshalTLVs(tlvs tlv.TLVs) error {
+	*r = DMSGetMSISDNResponse{}
+	voiceNumber, ok := tlv.Value(tlvs, dmsTLVVoiceNumber)
+	if !ok {
+		return errors.New("parsing QMI DMS MSISDN: voice number TLV missing")
 	}
-	err = fn(clientID)
-	releaseErr := r.releaseServiceClientID(ctx, service, clientID)
-	if err != nil {
-		return errors.Join(err, releaseErr)
+	r.VoiceNumber = string(voiceNumber)
+	if mobileIDNumber, ok := tlv.Value(tlvs, dmsTLVMobileIDNumber); ok {
+		r.MobileIDNumber = string(mobileIDNumber)
 	}
-	return releaseErr
+	if imsi, ok := tlv.Value(tlvs, dmsTLVIMSI); ok {
+		r.IMSI = string(imsi)
+	}
+	return nil
 }
 
 // DMSGetOperatingModeResponse is the parsed QMI DMS Get Operating Mode response.

@@ -236,7 +236,7 @@ func validateItems(items tlv.Items) error {
 	return nil
 }
 
-func (c CommandFrame) Command() (Command, error) {
+func (c CommandFrame) Command() (command Command, err error) {
 	partial, err := c.validate()
 	if err != nil {
 		return MalformedCommand{CommandFrame: c, Err: err, ResponseCode: validationResult(err)}, nil
@@ -245,6 +245,16 @@ func (c CommandFrame) Command() (Command, error) {
 	if !knownCommandType(c.Details.Type) {
 		return UnknownCommand{CommandFrame: c}, nil
 	}
+	defer func() {
+		if err != nil {
+			command = MalformedCommand{
+				CommandFrame: c,
+				Err:          err,
+				ResponseCode: ResultCommandDataNotUnderstood,
+			}
+			err = nil
+		}
+	}()
 
 	switch c.Details.Type {
 	case CommandDisplayText:
@@ -324,7 +334,7 @@ func (c CommandFrame) Command() (Command, error) {
 
 type DisplayTextCommand struct {
 	CommandFrame
-	Text              Text
+	Text              TextString
 	HighPriority      bool
 	UserClear         bool
 	ImmediateResponse bool
@@ -334,7 +344,7 @@ type DisplayTextCommand struct {
 
 type GetInkeyCommand struct {
 	CommandFrame
-	Text                   Text
+	Text                   TextString
 	Alphabet               bool
 	YesNo                  bool
 	UCS2                   bool
@@ -346,8 +356,8 @@ type GetInkeyCommand struct {
 
 type GetInputCommand struct {
 	CommandFrame
-	Text          Text
-	DefaultText   *Text
+	Text          TextString
+	DefaultText   *TextString
 	Length        ResponseLength
 	Alphabet      bool
 	UCS2          bool
@@ -358,7 +368,7 @@ type GetInputCommand struct {
 
 type MenuCommand struct {
 	CommandFrame
-	Title         *Text
+	Title         *AlphaIdentifier
 	Items         []Item
 	DefaultItem   byte
 	HelpAvailable bool
@@ -374,8 +384,8 @@ type SetupEventListCommand struct {
 
 type SimpleCommand struct {
 	CommandFrame
-	Text          *Text
-	Alpha         *Text
+	Text          *TextString
+	Alpha         *AlphaIdentifier
 	Address       []byte
 	Subaddress    []byte
 	SMSTPDU       []byte
@@ -640,7 +650,9 @@ func (cmd *DisplayTextCommand) UnmarshalFrame(frame CommandFrame) error {
 		UserClear:    frame.Details.Qualifier&0x80 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvTextString); ok {
-		_ = cmd.Text.UnmarshalBinary(item.Value)
+		if err := cmd.Text.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing display text: %w", err)
+		}
 	}
 	if _, ok := frame.TLVs.Find(tlvImmediateResp); ok {
 		cmd.ImmediateResponse = true
@@ -660,7 +672,9 @@ func (cmd *GetInkeyCommand) UnmarshalFrame(frame CommandFrame) error {
 		HelpAvailable:          frame.Details.Qualifier&0x80 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvTextString); ok {
-		_ = cmd.Text.UnmarshalBinary(item.Value)
+		if err := cmd.Text.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing get inkey text: %w", err)
+		}
 	}
 	cmd.Duration = toDuration(frame.TLVs)
 	return nil
@@ -676,11 +690,15 @@ func (cmd *GetInputCommand) UnmarshalFrame(frame CommandFrame) error {
 		HelpAvailable: frame.Details.Qualifier&0x80 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvTextString); ok {
-		_ = cmd.Text.UnmarshalBinary(item.Value)
+		if err := cmd.Text.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing get input text: %w", err)
+		}
 	}
 	if item, ok := frame.TLVs.Find(tlvDefaultText); ok {
-		var text Text
-		_ = text.UnmarshalBinary(item.Value)
+		var text TextString
+		if err := text.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing default text: %w", err)
+		}
 		cmd.DefaultText = &text
 	}
 	if item, ok := frame.TLVs.Find(tlvResponseLength); ok && len(item.Value) >= 2 {
@@ -695,13 +713,10 @@ func (cmd *MenuCommand) UnmarshalFrame(frame CommandFrame) error {
 		HelpAvailable: frame.Details.Qualifier&0x80 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var title Text
-		_ = title.UnmarshalText(item.Value)
-		cmd.Title = &title
-	}
-	if item, ok := frame.TLVs.Find(tlvDefaultText); ok {
-		var title Text
-		_ = title.UnmarshalBinary(item.Value)
+		var title AlphaIdentifier
+		if err := title.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing menu title: %w", err)
+		}
 		cmd.Title = &title
 	}
 	if item, ok := frame.TLVs.Find(tlvItemID); ok && len(item.Value) > 0 {
@@ -711,8 +726,10 @@ func (cmd *MenuCommand) UnmarshalFrame(frame CommandFrame) error {
 		if len(item.Value) == 0 {
 			continue
 		}
-		var text Text
-		_ = text.UnmarshalText(item.Value[1:])
+		var text AlphaIdentifier
+		if err := text.UnmarshalBinary(item.Value[1:]); err != nil {
+			return fmt.Errorf("parsing menu item %d: %w", item.Value[0], err)
+		}
 		cmd.Items = append(cmd.Items, Item{
 			Identifier: item.Value[0],
 			Text:       text,
@@ -760,8 +777,10 @@ func (cmd *OpenChannelCommand) UnmarshalFrame(frame CommandFrame) error {
 		LaunchParameters:      frame.Details.Qualifier&0x01 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var alpha Text
-		_ = alpha.UnmarshalText(item.Value)
+		var alpha AlphaIdentifier
+		if err := alpha.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing open channel alpha identifier: %w", err)
+		}
 		cmd.Alpha = &alpha
 	}
 	cmd.Icon = toIcon(frame.TLVs)
@@ -808,13 +827,17 @@ func (cmd *OpenChannelCommand) UnmarshalFrame(frame CommandFrame) error {
 	}
 	texts := frame.TLVs.All(tlvTextString)
 	if len(texts) > 0 {
-		var login Text
-		_ = login.UnmarshalBinary(texts[0].Value)
+		var login TextString
+		if err := login.UnmarshalBinary(texts[0].Value); err != nil {
+			return fmt.Errorf("parsing open channel login: %w", err)
+		}
 		cmd.Login = &login
 	}
 	if len(texts) > 1 {
-		var password Text
-		_ = password.UnmarshalBinary(texts[1].Value)
+		var password TextString
+		if err := password.UnmarshalBinary(texts[1].Value); err != nil {
+			return fmt.Errorf("parsing open channel password: %w", err)
+		}
 		cmd.Password = &password
 	}
 	return nil
@@ -828,8 +851,10 @@ func (cmd *CloseChannelCommand) UnmarshalFrame(frame CommandFrame) error {
 		TCPListenAfterClose: frame.Details.Qualifier&0x01 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var alpha Text
-		_ = alpha.UnmarshalText(item.Value)
+		var alpha AlphaIdentifier
+		if err := alpha.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing close channel alpha identifier: %w", err)
+		}
 		cmd.Alpha = &alpha
 	}
 	cmd.Icon = toIcon(frame.TLVs)
@@ -842,8 +867,10 @@ func (cmd *ReceiveDataCommand) UnmarshalFrame(frame CommandFrame) error {
 		ChannelID:    channelIdentifier(frame.Devices.Destination),
 	}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var alpha Text
-		_ = alpha.UnmarshalText(item.Value)
+		var alpha AlphaIdentifier
+		if err := alpha.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing receive data alpha identifier: %w", err)
+		}
 		cmd.Alpha = &alpha
 	}
 	cmd.Icon = toIcon(frame.TLVs)
@@ -860,8 +887,10 @@ func (cmd *SendDataCommand) UnmarshalFrame(frame CommandFrame) error {
 		SendImmediately: frame.Details.Qualifier&0x01 != 0,
 	}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var alpha Text
-		_ = alpha.UnmarshalText(item.Value)
+		var alpha AlphaIdentifier
+		if err := alpha.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing send data alpha identifier: %w", err)
+		}
 		cmd.Alpha = &alpha
 	}
 	cmd.Icon = toIcon(frame.TLVs)
@@ -874,8 +903,10 @@ func (cmd *SendDataCommand) UnmarshalFrame(frame CommandFrame) error {
 func (cmd *GetChannelStatusCommand) UnmarshalFrame(frame CommandFrame) error {
 	*cmd = GetChannelStatusCommand{CommandFrame: frame}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var alpha Text
-		_ = alpha.UnmarshalText(item.Value)
+		var alpha AlphaIdentifier
+		if err := alpha.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing channel status alpha identifier: %w", err)
+		}
 		cmd.Alpha = &alpha
 	}
 	cmd.Icon = toIcon(frame.TLVs)
@@ -892,13 +923,17 @@ func channelIdentifier(device DeviceID) byte {
 func (cmd *SimpleCommand) UnmarshalFrame(frame CommandFrame) error {
 	*cmd = SimpleCommand{CommandFrame: frame}
 	if item, ok := frame.TLVs.Find(tlvTextString); ok {
-		var text Text
-		_ = text.UnmarshalBinary(item.Value)
+		var text TextString
+		if err := text.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing command text: %w", err)
+		}
 		cmd.Text = &text
 	}
 	if item, ok := frame.TLVs.Find(tlvAlphaID); ok {
-		var alpha Text
-		_ = alpha.UnmarshalText(item.Value)
+		var alpha AlphaIdentifier
+		if err := alpha.UnmarshalBinary(item.Value); err != nil {
+			return fmt.Errorf("parsing command alpha identifier: %w", err)
+		}
 		cmd.Alpha = &alpha
 	}
 	if item, ok := frame.TLVs.Find(tlvAddress); ok {

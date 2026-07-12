@@ -183,7 +183,7 @@ const (
 
 type OpenChannelCommand struct {
 	CommandFrame
-	Alpha                 *Text
+	Alpha                 *AlphaIdentifier
 	Icon                  *Icon
 	BearerDescription     *BearerDescription
 	BufferSize            uint16
@@ -193,8 +193,8 @@ type OpenChannelCommand struct {
 	DestinationAddress    *OtherAddress
 	RemoteEntityAddress   *RemoteEntityAddress
 	TransportLevel        *TransportLevel
-	Login                 *Text
-	Password              *Text
+	Login                 *TextString
+	Password              *TextString
 	Immediate             bool
 	AutomaticReconnection bool
 	Background            bool
@@ -205,7 +205,7 @@ type OpenChannelCommand struct {
 type CloseChannelCommand struct {
 	CommandFrame
 	ChannelID           byte
-	Alpha               *Text
+	Alpha               *AlphaIdentifier
 	Icon                *Icon
 	ReuseNetworkAccess  bool
 	TCPListenAfterClose bool
@@ -214,7 +214,7 @@ type CloseChannelCommand struct {
 type ReceiveDataCommand struct {
 	CommandFrame
 	ChannelID byte
-	Alpha     *Text
+	Alpha     *AlphaIdentifier
 	Icon      *Icon
 	Length    byte
 }
@@ -222,7 +222,7 @@ type ReceiveDataCommand struct {
 type SendDataCommand struct {
 	CommandFrame
 	ChannelID       byte
-	Alpha           *Text
+	Alpha           *AlphaIdentifier
 	Icon            *Icon
 	Data            []byte
 	SendImmediately bool
@@ -230,7 +230,7 @@ type SendDataCommand struct {
 
 type GetChannelStatusCommand struct {
 	CommandFrame
-	Alpha *Text
+	Alpha *AlphaIdentifier
 	Icon  *Icon
 }
 

@@ -40,7 +40,7 @@ type IMSPDNInfo struct {
 }
 
 type IMSPDNSession struct {
-	reader    *Reader
+	client    *Client
 	sessionID uint32
 	timeout   time.Duration
 	info      IMSPDNInfo
@@ -49,12 +49,12 @@ type IMSPDNSession struct {
 	closeErr  error
 }
 
-func (r *Reader) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSession, error) {
-	if r == nil {
-		return nil, errors.New("opening MBIM IMS PDN: reader is nil")
+func (c *Client) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSession, error) {
+	if c == nil {
+		return nil, errors.New("opening MBIM IMS PDN: client is nil")
 	}
 	cfg = normalizeIMSPDNConfig(cfg)
-	deviceCaps, err := r.DeviceCaps(ctx)
+	deviceCaps, err := c.DeviceCaps(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("opening MBIM IMS PDN: %w", err)
 	}
@@ -64,12 +64,12 @@ func (r *Reader) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSessi
 	if cfg.SessionID >= deviceCaps.MaxSessions {
 		return nil, fmt.Errorf("opening MBIM IMS PDN: session ID %d is out of range for %d supported sessions", cfg.SessionID, deviceCaps.MaxSessions)
 	}
-	if err := r.ensurePacketServiceAttached(ctx); err != nil {
+	if err := c.ensurePacketServiceAttached(ctx); err != nil {
 		return nil, fmt.Errorf("opening MBIM IMS PDN: %w", err)
 	}
 
 	session := &IMSPDNSession{
-		reader:    r,
+		client:    c,
 		sessionID: cfg.SessionID,
 		timeout:   cfg.RequestTimeout,
 	}
@@ -82,7 +82,7 @@ func (r *Reader) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSessi
 		return nil, fmt.Errorf("opening MBIM IMS PDN: activation state %d, want %d", connect.ActivationState, ActivationStateActivated)
 	}
 
-	ipConfig, err := r.IPConfiguration(ctx, cfg.SessionID)
+	ipConfig, err := c.IPConfiguration(ctx, cfg.SessionID)
 	if err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("opening MBIM IMS PDN: %w", err)
@@ -121,7 +121,7 @@ func (s *IMSPDNSession) Close() error {
 		return nil
 	}
 	s.closeOnce.Do(func() {
-		if s.reader == nil {
+		if s.client == nil {
 			return
 		}
 		timeout := s.timeout
@@ -132,8 +132,8 @@ func (s *IMSPDNSession) Close() error {
 		defer cancel()
 
 		request := ConnectRequest{
-			TransactionID:     s.reader.nextTransactionID(),
-			MBIMExVersion:     s.reader.mbimExVersion,
+			TransactionID:     s.client.nextTransactionID(),
+			MBIMExVersion:     s.client.mbimExVersion,
 			Timeout:           timeout,
 			SessionID:         s.sessionID,
 			ActivationCommand: ActivationCommandDeactivate,
@@ -141,7 +141,7 @@ func (s *IMSPDNSession) Close() error {
 			ContextType:       ContextTypeIMS,
 			MediaPreference:   AccessMediaType3GPP,
 		}
-		err := s.reader.transmit(ctx, request.Request())
+		err := s.client.transmit(ctx, request.Request())
 		if errors.Is(err, StatusContextNotActivated) {
 			err = nil
 		}
@@ -155,8 +155,8 @@ func (s *IMSPDNSession) Close() error {
 
 func (s *IMSPDNSession) activate(ctx context.Context, cfg IMSPDNConfig) (ConnectInfo, error) {
 	request := ConnectRequest{
-		TransactionID:     s.reader.nextTransactionID(),
-		MBIMExVersion:     s.reader.mbimExVersion,
+		TransactionID:     s.client.nextTransactionID(),
+		MBIMExVersion:     s.client.mbimExVersion,
 		Timeout:           cfg.RequestTimeout,
 		SessionID:         cfg.SessionID,
 		ActivationCommand: ActivationCommandActivate,
@@ -167,7 +167,7 @@ func (s *IMSPDNSession) activate(ctx context.Context, cfg IMSPDNConfig) (Connect
 		ContextType:       ContextTypeIMS,
 		MediaPreference:   AccessMediaType3GPP,
 	}
-	if err := s.reader.transmit(ctx, request.Request()); err != nil {
+	if err := s.client.transmit(ctx, request.Request()); err != nil {
 		return ConnectInfo{}, fmt.Errorf("activating MBIM IMS PDN: %w", err)
 	}
 	return *request.Response, nil
@@ -190,8 +190,8 @@ func normalizeIMSPDNConfig(cfg IMSPDNConfig) IMSPDNConfig {
 	return cfg
 }
 
-func (r *Reader) ensurePacketServiceAttached(ctx context.Context) error {
-	info, err := r.PacketService(ctx)
+func (c *Client) ensurePacketServiceAttached(ctx context.Context) error {
+	info, err := c.PacketService(ctx)
 	if err != nil {
 		return err
 	}
@@ -199,9 +199,9 @@ func (r *Reader) ensurePacketServiceAttached(ctx context.Context) error {
 	case PacketServiceStateAttached:
 		return nil
 	case PacketServiceStateAttaching:
-		return r.waitPacketServiceAttached(ctx)
+		return c.waitPacketServiceAttached(ctx)
 	case PacketServiceStateDetached, PacketServiceStateUnknown:
-		info, err := r.SetPacketService(ctx, PacketServiceActionAttach)
+		info, err := c.SetPacketService(ctx, PacketServiceActionAttach)
 		if err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (r *Reader) ensurePacketServiceAttached(ctx context.Context) error {
 	}
 }
 
-func (r *Reader) waitPacketServiceAttached(ctx context.Context) error {
+func (c *Client) waitPacketServiceAttached(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, mbimCIDLongResponseTimeout)
 	defer cancel()
 
@@ -226,7 +226,7 @@ func (r *Reader) waitPacketServiceAttached(ctx context.Context) error {
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for MBIM packet service attach: %w", ctx.Err())
 		case <-ticker.C:
-			info, err := r.PacketService(ctx)
+			info, err := c.PacketService(ctx)
 			if err != nil {
 				return err
 			}

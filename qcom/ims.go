@@ -1,0 +1,423 @@
+package qcom
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/damonto/wwan-go/qcom/tlv"
+)
+
+const DefaultIMSPDNAPN = "ims"
+
+// PDNConfig describes a general QMI WDS packet-data call.
+type PDNConfig struct {
+	APN               string
+	IPPreference      WDSIPPreference
+	ProfileIndex      uint8
+	RequestTimeout    time.Duration
+	MuxDataPort       *WDSMuxDataPort
+	LegacyMuxDataPort WDSSIOPort
+	CallType          *WDSCallType
+}
+
+// PDNInfo contains the negotiated network configuration of a packet-data call.
+type PDNInfo struct {
+	LocalIPv4        net.IP
+	LocalIPv6        net.IP
+	IPv4Gateway      net.IP
+	IPv4SubnetMask   net.IP
+	IPv6Gateway      net.IP
+	IPv6PrefixLength uint8
+	DNS              []net.IP
+	MTU              uint32
+	IPFamily         WDSIPFamily
+	PacketDataReady  bool
+}
+
+// IMSPDNConfig describes the modem-side IMS PDN request.
+type IMSPDNConfig struct {
+	APN               string
+	IPPreference      WDSIPPreference
+	ProfileIndex      uint8
+	RequestTimeout    time.Duration
+	MuxDataPort       *WDSMuxDataPort
+	LegacyMuxDataPort WDSSIOPort
+}
+
+// IMSPDNInfo contains IMS-specific state in addition to the underlying PDN.
+type IMSPDNInfo struct {
+	PDNInfo
+	PCSCFIPs      []net.IP
+	IMCN          bool
+	VoPSKnown     bool
+	VoPSSupported bool
+}
+
+type pdnOpenConfig struct {
+	PDNConfig
+	technology        WDSTechnologyPreference
+	requestedSettings WDSRuntimeSettingsMask
+}
+
+// PDNSession owns a WDS packet-data handle and its QMI client ID.
+type PDNSession struct {
+	client  *Client
+	info    PDNInfo
+	runtime WDSRuntimeSettings
+
+	timeout          time.Duration
+	closeOnce        sync.Once
+	closeErr         error
+	wdsClientID      uint8
+	packetDataHandle uint32
+}
+
+// IMSPDNSession owns an IMS PDN and the NAS client used for VoPS state.
+type IMSPDNSession struct {
+	pdn  *PDNSession
+	info IMSPDNInfo
+
+	closeOnce   sync.Once
+	closeErr    error
+	nasClientID uint8
+}
+
+// OpenPDN starts a general QMI WDS packet-data call. It does not allocate a NAS
+// client or apply IMS defaults.
+func (c *Client) OpenPDN(ctx context.Context, cfg PDNConfig) (*PDNSession, error) {
+	session, err := c.openPDN(ctx, pdnOpenConfig{
+		PDNConfig:         cfg,
+		requestedSettings: WDSRuntimeRequestedNetworkSettings,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("opening PDN: %w", err)
+	}
+	return session, nil
+}
+
+// OpenIMSPDN starts an IMS PDN and reads the matching NAS voice state.
+func (c *Client) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSession, error) {
+	if c == nil {
+		return nil, errors.New("opening IMS PDN: client is nil")
+	}
+	cfg.APN = strings.TrimSpace(cfg.APN)
+	if cfg.APN == "" {
+		cfg.APN = DefaultIMSPDNAPN
+	}
+	callType := WDSCallTypeEmbedded
+	pdn, err := c.openPDN(ctx, pdnOpenConfig{
+		PDNConfig: PDNConfig{
+			APN:               cfg.APN,
+			IPPreference:      cfg.IPPreference,
+			ProfileIndex:      cfg.ProfileIndex,
+			RequestTimeout:    cfg.RequestTimeout,
+			MuxDataPort:       cfg.MuxDataPort,
+			LegacyMuxDataPort: cfg.LegacyMuxDataPort,
+			CallType:          &callType,
+		},
+		technology: WDSTechnologyPreference3GPP,
+		requestedSettings: WDSRuntimeRequestedIMSSettings |
+			WDSRuntimeRequestedNetworkSettings,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("opening IMS PDN: %w", err)
+	}
+
+	session := &IMSPDNSession{pdn: pdn}
+	nasClientID, err := c.allocateServiceClientID(ctx, ServiceNAS)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("opening IMS PDN: allocate NAS client: %w", err), pdn.Close())
+	}
+	session.nasClientID = nasClientID
+
+	sys, err := session.nasSysInfo(ctx)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("opening IMS PDN: read NAS system info: %w", err), session.Close())
+	}
+	session.info = IMSPDNInfo{
+		PDNInfo:       pdn.Info(),
+		PCSCFIPs:      cloneIPs(pdn.runtime.PCSCFIPs),
+		IMCN:          pdn.runtime.IMCN,
+		VoPSKnown:     sys.VoPSKnown,
+		VoPSSupported: sys.VoPSSupported,
+	}
+	return session, nil
+}
+
+func (c *Client) openPDN(ctx context.Context, cfg pdnOpenConfig) (*PDNSession, error) {
+	if c == nil {
+		return nil, errors.New("client is nil")
+	}
+	if cfg.MuxDataPort != nil && cfg.LegacyMuxDataPort != 0 {
+		return nil, errors.New("mux data port and legacy mux data port are mutually exclusive")
+	}
+	if err := validateWDSIPPreference(cfg.IPPreference); err != nil {
+		return nil, err
+	}
+	cfg.APN = strings.TrimSpace(cfg.APN)
+	timeout := cfg.RequestTimeout
+	if timeout <= 0 {
+		timeout = DefaultRequestTimeout
+	}
+	session := &PDNSession{client: c, timeout: timeout}
+
+	wdsClientID, err := c.allocateServiceClientID(ctx, ServiceWDS)
+	if err != nil {
+		return nil, fmt.Errorf("allocate WDS client: %w", err)
+	}
+	session.wdsClientID = wdsClientID
+	if cfg.IPPreference == WDSIPPreferenceIPv4 || cfg.IPPreference == WDSIPPreferenceIPv6 {
+		if err := session.setClientIPFamily(ctx, WDSIPFamily(cfg.IPPreference)); err != nil {
+			return nil, errors.Join(err, session.Close())
+		}
+	}
+	if cfg.MuxDataPort != nil {
+		if err := session.bindMuxDataPort(ctx, *cfg.MuxDataPort); err != nil {
+			return nil, errors.Join(err, session.Close())
+		}
+	} else if cfg.LegacyMuxDataPort != 0 {
+		if err := session.bindLegacyMuxDataPort(ctx, cfg.LegacyMuxDataPort); err != nil {
+			return nil, errors.Join(err, session.Close())
+		}
+	}
+	if err := session.start(ctx, cfg); err != nil {
+		return nil, errors.Join(err, session.Close())
+	}
+	runtime, err := session.runtimeSettings(ctx, cfg.requestedSettings)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("read runtime settings: %w", err), session.Close())
+	}
+	session.runtime = runtime
+	session.info = pdnInfo(runtime, session.packetDataHandle != 0)
+	return session, nil
+}
+
+func validateWDSIPPreference(preference WDSIPPreference) error {
+	switch preference {
+	case WDSIPPreferenceDefault,
+		WDSIPPreferenceIPv4,
+		WDSIPPreferenceIPv6,
+		WDSIPPreferenceUnspecified:
+		return nil
+	default:
+		return fmt.Errorf("unsupported WDS IP preference %d", preference)
+	}
+}
+
+func pdnInfo(runtime WDSRuntimeSettings, ready bool) PDNInfo {
+	return PDNInfo{
+		LocalIPv4:        append(net.IP(nil), runtime.LocalIPv4...),
+		LocalIPv6:        append(net.IP(nil), runtime.LocalIPv6...),
+		IPv4Gateway:      append(net.IP(nil), runtime.IPv4Gateway...),
+		IPv4SubnetMask:   append(net.IP(nil), runtime.IPv4SubnetMask...),
+		IPv6Gateway:      append(net.IP(nil), runtime.IPv6Gateway...),
+		IPv6PrefixLength: runtime.IPv6PrefixLength,
+		DNS:              cloneIPs(runtime.DNS),
+		MTU:              runtime.MTU,
+		IPFamily:         runtime.IPFamily,
+		PacketDataReady:  ready,
+	}
+}
+
+// Info returns a defensive copy of the negotiated PDN state.
+func (s *PDNSession) Info() PDNInfo {
+	if s == nil {
+		return PDNInfo{}
+	}
+	return clonePDNInfo(s.info)
+}
+
+// Info returns a defensive copy of the IMS PDN state.
+func (s *IMSPDNSession) Info() IMSPDNInfo {
+	if s == nil {
+		return IMSPDNInfo{}
+	}
+	info := s.info
+	info.PDNInfo = clonePDNInfo(info.PDNInfo)
+	info.PCSCFIPs = cloneIPs(info.PCSCFIPs)
+	return info
+}
+
+func clonePDNInfo(info PDNInfo) PDNInfo {
+	info.LocalIPv4 = append(net.IP(nil), info.LocalIPv4...)
+	info.LocalIPv6 = append(net.IP(nil), info.LocalIPv6...)
+	info.IPv4Gateway = append(net.IP(nil), info.IPv4Gateway...)
+	info.IPv4SubnetMask = append(net.IP(nil), info.IPv4SubnetMask...)
+	info.IPv6Gateway = append(net.IP(nil), info.IPv6Gateway...)
+	info.DNS = cloneIPs(info.DNS)
+	return info
+}
+
+// Close stops the packet-data call and releases its WDS client.
+func (s *PDNSession) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultCloseTimeout)
+		defer cancel()
+
+		var err error
+		if s.packetDataHandle != 0 && s.wdsClientID != 0 {
+			err = errors.Join(err, s.stop(ctx))
+		}
+		if s.wdsClientID != 0 {
+			err = errors.Join(err, s.client.releaseServiceClientID(ctx, ServiceWDS, s.wdsClientID))
+			s.wdsClientID = 0
+		}
+		s.closeErr = err
+	})
+	return s.closeErr
+}
+
+// Close stops the IMS PDN and releases its NAS client.
+func (s *IMSPDNSession) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultCloseTimeout)
+		defer cancel()
+
+		var err error
+		if s.pdn != nil {
+			err = errors.Join(err, s.pdn.Close())
+		}
+		if s.nasClientID != 0 && s.pdn != nil {
+			err = errors.Join(err, s.pdn.client.releaseServiceClientID(ctx, ServiceNAS, s.nasClientID))
+			s.nasClientID = 0
+		}
+		s.closeErr = err
+	})
+	return s.closeErr
+}
+
+func (s *PDNSession) setClientIPFamily(ctx context.Context, family WDSIPFamily) error {
+	resp, err := s.client.requestServiceWithTimeout(ctx, ServiceWDS, s.wdsClientID, MessageWDSSetClientIPFamily, tlv.TLVs{tlv.Uint(0x01, uint8(family))}, s.timeout)
+	if err != nil {
+		return fmt.Errorf("set WDS client IP family: %w", err)
+	}
+	if err := resultOK(resp); err != nil {
+		return fmt.Errorf("set WDS client IP family: %w", err)
+	}
+	return nil
+}
+
+func (s *PDNSession) bindMuxDataPort(ctx context.Context, dataPort WDSMuxDataPort) error {
+	req := WDSBindMuxDataPortRequest{ClientID: s.wdsClientID, Timeout: s.timeout, DataPort: dataPort}.Request()
+	resp, err := s.client.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+	if err != nil {
+		return &WDSBindMuxDataPortError{Err: err}
+	}
+	if err := resultOK(resp); err != nil {
+		return &WDSBindMuxDataPortError{Err: err}
+	}
+	return nil
+}
+
+func (s *PDNSession) bindLegacyMuxDataPort(ctx context.Context, dataPort WDSSIOPort) error {
+	req := WDSLegacyBindMuxDataPortRequest{ClientID: s.wdsClientID, Timeout: s.timeout, DataPort: dataPort}.Request()
+	resp, err := s.client.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+	if err != nil {
+		return fmt.Errorf("bind WDS legacy mux data port: %w", err)
+	}
+	if err := resultOK(resp); err != nil {
+		return fmt.Errorf("bind WDS legacy mux data port: %w", err)
+	}
+	return nil
+}
+
+func (s *PDNSession) start(ctx context.Context, cfg pdnOpenConfig) error {
+	req := WDSStartNetworkInterfaceRequest{
+		ClientID:             s.wdsClientID,
+		Timeout:              s.timeout,
+		APN:                  cfg.APN,
+		IPPreference:         cfg.IPPreference,
+		TechnologyPreference: cfg.technology,
+		ProfileIndex3GPP:     cfg.ProfileIndex,
+		CallType:             cfg.CallType,
+	}.Request()
+	resp, err := s.client.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+	if err != nil {
+		return fmt.Errorf("start WDS network: %w", err)
+	}
+	var parsed WDSStartNetworkInterfaceResponse
+	if err := parsed.UnmarshalTLVs(resp.TLVs); err != nil {
+		return err
+	}
+	if err := resultOK(resp); err != nil {
+		return &WDSStartNetworkError{
+			Err:                     err,
+			CallEndReason:           parsed.CallEndReason,
+			HasCallEndReason:        parsed.HasCallEndReason,
+			VerboseCallEndReason:    parsed.VerboseCallEndReason,
+			HasVerboseCallEndReason: parsed.HasVerboseCallEndReason,
+		}
+	}
+	if parsed.PacketDataHandle == 0 {
+		return errors.New("start WDS network: packet data handle is missing")
+	}
+	s.packetDataHandle = parsed.PacketDataHandle
+	return nil
+}
+
+func (s *PDNSession) stop(ctx context.Context) error {
+	req := WDSStopNetworkInterfaceRequest{ClientID: s.wdsClientID, Timeout: s.timeout, PacketDataHandle: s.packetDataHandle}.Request()
+	resp, err := s.client.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+	if err != nil {
+		return fmt.Errorf("stop WDS network: %w", err)
+	}
+	if err := resultOK(resp); err != nil {
+		return fmt.Errorf("stop WDS network: %w", err)
+	}
+	s.packetDataHandle = 0
+	return nil
+}
+
+func (s *PDNSession) runtimeSettings(ctx context.Context, requested WDSRuntimeSettingsMask) (WDSRuntimeSettings, error) {
+	req := WDSGetRuntimeSettingsRequest{ClientID: s.wdsClientID, Timeout: s.timeout, RequestedSettings: requested}.Request()
+	resp, err := s.client.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+	if err != nil {
+		return WDSRuntimeSettings{}, err
+	}
+	if err := resultOK(resp); err != nil {
+		return WDSRuntimeSettings{}, err
+	}
+	var parsed WDSGetRuntimeSettingsResponse
+	if err := parsed.UnmarshalTLVs(resp.TLVs); err != nil {
+		return WDSRuntimeSettings{}, err
+	}
+	return parsed.Settings, nil
+}
+
+func (s *IMSPDNSession) nasSysInfo(ctx context.Context) (NASSysInfo, error) {
+	req := NASGetSysInfoRequest{ClientID: s.nasClientID, Timeout: s.pdn.timeout}.Request()
+	resp, err := s.pdn.client.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+	if err != nil {
+		return NASSysInfo{}, err
+	}
+	if err := resultOK(resp); err != nil {
+		return NASSysInfo{}, err
+	}
+	var parsed NASGetSysInfoResponse
+	if err := parsed.UnmarshalTLVs(resp.TLVs); err != nil {
+		return NASSysInfo{}, err
+	}
+	return parsed.SysInfo, nil
+}
+
+func cloneIPs(ips []net.IP) []net.IP {
+	if len(ips) == 0 {
+		return nil
+	}
+	cloned := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		cloned = append(cloned, append(net.IP(nil), ip...))
+	}
+	return cloned
+}

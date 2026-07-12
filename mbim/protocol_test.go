@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/damonto/uicc-go/apdu"
+	"github.com/damonto/wwan-go/apdu"
 )
 
 func TestRequestMarshalBinary(t *testing.T) {
@@ -281,7 +281,7 @@ func TestCommandRequestTimeouts(t *testing.T) {
 	}
 }
 
-func TestReaderNegotiatesMBIMExVersion(t *testing.T) {
+func TestClientNegotiatesMBIMExVersion(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -313,22 +313,22 @@ func TestReaderNegotiatesMBIMExVersion(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := reader.negotiateVersion(ctx); err != nil {
+	if err := mbimClient.negotiateVersion(ctx); err != nil {
 		t.Fatalf("negotiateVersion() error = %v", err)
 	}
-	if reader.mbimExVersion != mbimExVersion40 {
-		t.Fatalf("mbimExVersion = %#x, want %#x", reader.mbimExVersion, mbimExVersion40)
+	if mbimClient.mbimExVersion != mbimExVersion40 {
+		t.Fatalf("mbimExVersion = %#x, want %#x", mbimClient.mbimExVersion, mbimExVersion40)
 	}
 	if err := <-errc; err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestReaderConnectSkipsSlotActivationWithMBIMEx4(t *testing.T) {
+func TestClientConnectSkipsSlotActivationWithMBIMEx4(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -370,22 +370,22 @@ func TestReaderConnectSkipsSlotActivationWithMBIMEx4(t *testing.T) {
 		errc <- expectNoMBIMCommand(server, 50*time.Millisecond)
 	}()
 
-	reader := &Reader{conn: client, slot: 1}
+	mbimClient := &Client{conn: client, slot: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := reader.connect(ctx, ""); err != nil {
+	if err := mbimClient.connect(ctx, ""); err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
-	if reader.mbimExVersion != mbimExVersion40 {
-		t.Fatalf("mbimExVersion = %#x, want %#x", reader.mbimExVersion, mbimExVersion40)
+	if mbimClient.mbimExVersion != mbimExVersion40 {
+		t.Fatalf("mbimExVersion = %#x, want %#x", mbimClient.mbimExVersion, mbimExVersion40)
 	}
 	if err := <-errc; err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestReaderConnectActivatesSlotBeforeMBIMEx4(t *testing.T) {
+func TestClientConnectActivatesSlotBeforeMBIMEx4(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -423,15 +423,15 @@ func TestReaderConnectActivatesSlotBeforeMBIMEx4(t *testing.T) {
 		errc <- expectNoMBIMCommand(server, 50*time.Millisecond)
 	}()
 
-	reader := &Reader{conn: client, slot: 1}
+	mbimClient := &Client{conn: client, slot: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := reader.connect(ctx, ""); err != nil {
+	if err := mbimClient.connect(ctx, ""); err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
-	if reader.mbimExVersion != mbimExVersion10 {
-		t.Fatalf("mbimExVersion = %#x, want %#x", reader.mbimExVersion, mbimExVersion10)
+	if mbimClient.mbimExVersion != mbimExVersion10 {
+		t.Fatalf("mbimExVersion = %#x, want %#x", mbimClient.mbimExVersion, mbimExVersion10)
 	}
 	if err := <-errc; err != nil {
 		t.Fatal(err)
@@ -1128,7 +1128,7 @@ func TestUICCChannelResponseUnmarshalBinary(t *testing.T) {
 	}
 }
 
-func TestReaderQueryUiccATR(t *testing.T) {
+func TestClientQueryUiccATR(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
@@ -1161,11 +1161,11 @@ func TestReaderQueryUiccATR(t *testing.T) {
 				}
 			}()
 
-			reader := &Reader{conn: client}
+			mbimClient := &Client{conn: client}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			got, err := reader.QueryUiccATR(ctx)
+			got, err := mbimClient.QueryUiccATR(ctx)
 			if err != nil {
 				t.Fatalf("QueryUiccATR() error = %v", err)
 			}
@@ -1179,7 +1179,7 @@ func TestReaderQueryUiccATR(t *testing.T) {
 	}
 }
 
-func TestReaderRadioState(t *testing.T) {
+func TestClientRadioState(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1198,11 +1198,11 @@ func TestReaderRadioState(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	got, err := reader.RadioState(ctx)
+	got, err := mbimClient.RadioState(ctx)
 	if err != nil {
 		t.Fatalf("RadioState() error = %v", err)
 	}
@@ -1217,7 +1217,7 @@ func TestReaderRadioState(t *testing.T) {
 	}
 }
 
-func TestReaderSetRadioState(t *testing.T) {
+func TestClientSetRadioState(t *testing.T) {
 	tests := []struct {
 		name  string
 		state RadioSwitchState
@@ -1247,11 +1247,11 @@ func TestReaderSetRadioState(t *testing.T) {
 				}
 			}()
 
-			reader := &Reader{conn: client}
+			mbimClient := &Client{conn: client}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			got, err := reader.SetRadioState(ctx, tt.state)
+			got, err := mbimClient.SetRadioState(ctx, tt.state)
 			if err != nil {
 				t.Fatalf("SetRadioState() error = %v", err)
 			}
@@ -1265,7 +1265,7 @@ func TestReaderSetRadioState(t *testing.T) {
 	}
 }
 
-func TestReaderUICCChannelTransmitsAPDU(t *testing.T) {
+func TestClientUICCChannelTransmitsAPDU(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1318,10 +1318,10 @@ func TestReaderUICCChannelTransmitsAPDU(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	channel, err := reader.OpenChannel(ctx, aid)
+	channel, err := mbimClient.OpenChannel(ctx, aid)
 	if err != nil {
 		t.Fatalf("OpenChannel() error = %v", err)
 	}
@@ -1330,7 +1330,7 @@ func TestReaderUICCChannelTransmitsAPDU(t *testing.T) {
 	data = append(data, autn...)
 	apduRequest := apdu.Request{CLA: 0x00, INS: 0x88, P1: 0x00, P2: 0x81, Data: data}
 	req := apduRequest.APDU()
-	got, status, err := reader.TransmitAPDU(ctx, channel, req)
+	got, status, err := mbimClient.TransmitAPDU(ctx, channel, req)
 	if err != nil {
 		t.Fatalf("TransmitAPDU() error = %v", err)
 	}
@@ -1340,7 +1340,7 @@ func TestReaderUICCChannelTransmitsAPDU(t *testing.T) {
 	if want := apduResponse; !bytes.Equal(got, want) {
 		t.Fatalf("TransmitAPDU() = %X, want %X", got, want)
 	}
-	if err := reader.CloseChannel(ctx, channel); err != nil {
+	if err := mbimClient.CloseChannel(ctx, channel); err != nil {
 		t.Fatalf("CloseChannel() error = %v", err)
 	}
 	if err := <-errc; err != nil {
@@ -1348,7 +1348,7 @@ func TestReaderUICCChannelTransmitsAPDU(t *testing.T) {
 	}
 }
 
-func TestReaderUiccResetAndTerminalCapability(t *testing.T) {
+func TestClientUiccResetAndTerminalCapability(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1400,11 +1400,11 @@ func TestReaderUiccResetAndTerminalCapability(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	resetStatus, err := reader.SetUiccReset(ctx, UiccPassThroughActionEnable)
+	resetStatus, err := mbimClient.SetUiccReset(ctx, UiccPassThroughActionEnable)
 	if err != nil {
 		t.Fatalf("SetUiccReset() error = %v", err)
 	}
@@ -1412,7 +1412,7 @@ func TestReaderUiccResetAndTerminalCapability(t *testing.T) {
 		t.Fatalf("SetUiccReset() status = %d, want %d", resetStatus, UiccPassThroughStatusEnabled)
 	}
 
-	resetStatus, err = reader.QueryUiccReset(ctx)
+	resetStatus, err = mbimClient.QueryUiccReset(ctx)
 	if err != nil {
 		t.Fatalf("QueryUiccReset() error = %v", err)
 	}
@@ -1420,11 +1420,11 @@ func TestReaderUiccResetAndTerminalCapability(t *testing.T) {
 		t.Fatalf("QueryUiccReset() status = %d, want %d", resetStatus, UiccPassThroughStatusDisabled)
 	}
 
-	if err := reader.SetUiccTerminalCapability(ctx, terminalCapabilities); err != nil {
+	if err := mbimClient.SetUiccTerminalCapability(ctx, terminalCapabilities); err != nil {
 		t.Fatalf("SetUiccTerminalCapability() error = %v", err)
 	}
 
-	gotCapabilities, err := reader.QueryUiccTerminalCapability(ctx)
+	gotCapabilities, err := mbimClient.QueryUiccTerminalCapability(ctx)
 	if err != nil {
 		t.Fatalf("QueryUiccTerminalCapability() error = %v", err)
 	}
@@ -1442,7 +1442,7 @@ func TestReaderUiccResetAndTerminalCapability(t *testing.T) {
 	}
 }
 
-func TestReaderSTKEnvelopeChecksSupport(t *testing.T) {
+func TestClientSTKEnvelopeChecksSupport(t *testing.T) {
 	envelope := []byte{0xD1, 0x09, 0x82, 0x02, 0x83, 0x81, 0x8B, 0x03, 0x00, 0x7F, 0xF6}
 
 	tests := []struct {
@@ -1490,11 +1490,11 @@ func TestReaderSTKEnvelopeChecksSupport(t *testing.T) {
 				}
 			}()
 
-			reader := &Reader{conn: client}
+			mbimClient := &Client{conn: client}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			err := reader.STKEnvelope(ctx, envelope)
+			err := mbimClient.STKEnvelope(ctx, envelope)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("STKEnvelope() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -1505,7 +1505,7 @@ func TestReaderSTKEnvelopeChecksSupport(t *testing.T) {
 	}
 }
 
-func TestReaderSTKEnvelopeUsesCachedSupport(t *testing.T) {
+func TestClientSTKEnvelopeUsesCachedSupport(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1537,14 +1537,14 @@ func TestReaderSTKEnvelopeUsesCachedSupport(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if _, err := reader.QuerySTKEnvelopeSupport(ctx); err != nil {
+	if _, err := mbimClient.QuerySTKEnvelopeSupport(ctx); err != nil {
 		t.Fatalf("QuerySTKEnvelopeSupport() error = %v", err)
 	}
-	if err := reader.STKEnvelope(ctx, envelope); err != nil {
+	if err := mbimClient.STKEnvelope(ctx, envelope); err != nil {
 		t.Fatalf("STKEnvelope() error = %v", err)
 	}
 	if err := <-errc; err != nil {
@@ -1552,7 +1552,7 @@ func TestReaderSTKEnvelopeUsesCachedSupport(t *testing.T) {
 	}
 }
 
-func TestReaderSTKPACAndTerminalResponse(t *testing.T) {
+func TestClientSTKPACAndTerminalResponse(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1599,11 +1599,11 @@ func TestReaderSTKPACAndTerminalResponse(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	info, err := reader.QuerySTKPAC(ctx)
+	info, err := mbimClient.QuerySTKPAC(ctx)
 	if err != nil {
 		t.Fatalf("QuerySTKPAC() error = %v", err)
 	}
@@ -1611,7 +1611,7 @@ func TestReaderSTKPACAndTerminalResponse(t *testing.T) {
 		t.Fatalf("QuerySTKPAC().PacSupport[0x21] = %d", info.PacSupport[0x21])
 	}
 
-	info, err = reader.SetSTKPAC(ctx, pacHostControl)
+	info, err = mbimClient.SetSTKPAC(ctx, pacHostControl)
 	if err != nil {
 		t.Fatalf("SetSTKPAC() error = %v", err)
 	}
@@ -1619,7 +1619,7 @@ func TestReaderSTKPACAndTerminalResponse(t *testing.T) {
 		t.Fatalf("SetSTKPAC().PacSupport[0x21] = %d", info.PacSupport[0x21])
 	}
 
-	terminalResp, err := reader.STKTerminalResponse(ctx, terminalResponse)
+	terminalResp, err := mbimClient.STKTerminalResponse(ctx, terminalResponse)
 	if err != nil {
 		t.Fatalf("STKTerminalResponse() error = %v", err)
 	}
@@ -1632,7 +1632,7 @@ func TestReaderSTKPACAndTerminalResponse(t *testing.T) {
 	}
 }
 
-func TestReaderReadSTKPAC(t *testing.T) {
+func TestClientReadSTKPAC(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1651,11 +1651,11 @@ func TestReaderReadSTKPAC(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	got, err := reader.ReadSTKPAC(ctx)
+	got, err := mbimClient.ReadSTKPAC(ctx)
 	if err != nil {
 		t.Fatalf("ReadSTKPAC() error = %v", err)
 	}
@@ -1670,16 +1670,16 @@ func TestReaderReadSTKPAC(t *testing.T) {
 	}
 }
 
-func TestReaderReadSTKPACContinuesAfterDeadlineExceeded(t *testing.T) {
+func TestClientReadSTKPACContinuesAfterDeadlineExceeded(t *testing.T) {
 	command := []byte{0xD0, 0x03, 0x81, 0x01, 0x21}
 	payload := binary.LittleEndian.AppendUint32(nil, uint32(STKPACTypeProactiveCommand))
 	payload = append(payload, command...)
 	conn := &deadlineExceededConn{
 		read: bytes.NewReader(mbimIndication(ServiceSTK, CIDSTKPAC, payload)),
 	}
-	reader := &Reader{conn: conn}
+	mbimClient := &Client{conn: conn}
 
-	got, err := reader.ReadSTKPAC(context.Background())
+	got, err := mbimClient.ReadSTKPAC(context.Background())
 	if err != nil {
 		t.Fatalf("ReadSTKPAC() error = %v", err)
 	}
@@ -1691,7 +1691,7 @@ func TestReaderReadSTKPACContinuesAfterDeadlineExceeded(t *testing.T) {
 	}
 }
 
-func TestReaderQueuesSTKPACDuringCommand(t *testing.T) {
+func TestClientQueuesSTKPACDuringCommand(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1719,14 +1719,14 @@ func TestReaderQueuesSTKPACDuringCommand(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if _, err := reader.QueryUiccATR(ctx); err != nil {
+	if _, err := mbimClient.QueryUiccATR(ctx); err != nil {
 		t.Fatalf("QueryUiccATR() error = %v", err)
 	}
-	got, err := reader.ReadSTKPAC(ctx)
+	got, err := mbimClient.ReadSTKPAC(ctx)
 	if err != nil {
 		t.Fatalf("ReadSTKPAC() error = %v", err)
 	}
@@ -1738,7 +1738,7 @@ func TestReaderQueuesSTKPACDuringCommand(t *testing.T) {
 	}
 }
 
-func TestReaderReadSTKPACPreservesQueuedIndications(t *testing.T) {
+func TestClientReadSTKPACPreservesQueuedIndications(t *testing.T) {
 	tests := []struct {
 		name     string
 		commands [][]byte
@@ -1781,15 +1781,15 @@ func TestReaderReadSTKPACPreservesQueuedIndications(t *testing.T) {
 				}
 			}()
 
-			reader := &Reader{conn: client}
+			mbimClient := &Client{conn: client}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			if _, err := reader.QueryUiccATR(ctx); err != nil {
+			if _, err := mbimClient.QueryUiccATR(ctx); err != nil {
 				t.Fatalf("QueryUiccATR() error = %v", err)
 			}
 			for i, want := range tt.commands {
-				got, err := reader.ReadSTKPAC(ctx)
+				got, err := mbimClient.ReadSTKPAC(ctx)
 				if err != nil {
 					t.Fatalf("ReadSTKPAC(%d) error = %v", i, err)
 				}
@@ -1804,7 +1804,7 @@ func TestReaderReadSTKPACPreservesQueuedIndications(t *testing.T) {
 	}
 }
 
-func TestReaderWatchSTKPAC(t *testing.T) {
+func TestClientWatchSTKPAC(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1823,11 +1823,11 @@ func TestReaderWatchSTKPAC(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	pacs, err := reader.WatchSTKPAC(ctx)
+	pacs, err := mbimClient.WatchSTKPAC(ctx)
 	if err != nil {
 		t.Fatalf("WatchSTKPAC() error = %v", err)
 	}
@@ -1847,7 +1847,7 @@ func TestReaderWatchSTKPAC(t *testing.T) {
 	}
 }
 
-func TestReaderAuthenticateAKAReturnsAUTSOnSyncFailure(t *testing.T) {
+func TestClientAuthenticateAKAReturnsAUTSOnSyncFailure(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -1871,11 +1871,11 @@ func TestReaderAuthenticateAKAReturnsAUTSOnSyncFailure(t *testing.T) {
 		}
 	}()
 
-	reader := &Reader{conn: client}
+	mbimClient := &Client{conn: client}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	got, err := reader.AuthenticateAKA(ctx, rand, autn)
+	got, err := mbimClient.AuthenticateAKA(ctx, rand, autn)
 	if !errors.Is(err, StatusAuthSyncFailure) {
 		t.Fatalf("AuthenticateAKA() error = %v, want StatusAuthSyncFailure", err)
 	}

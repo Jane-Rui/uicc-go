@@ -87,9 +87,9 @@ func (r *ProvisionedContext) unmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (r *Reader) ProvisionedContexts(ctx context.Context) ([]ProvisionedContext, error) {
-	request := ProvisionedContextsRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) ProvisionedContexts(ctx context.Context) ([]ProvisionedContext, error) {
+	request := ProvisionedContextsRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, fmt.Errorf("reading MBIM provisioned contexts: %w", err)
 	}
 	return request.Response.Contexts, nil

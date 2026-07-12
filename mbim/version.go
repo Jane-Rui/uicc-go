@@ -5,11 +5,11 @@ import (
 	"fmt"
 )
 
-func (r *Reader) negotiateVersion(ctx context.Context) error {
-	r.mbimExVersion = mbimExVersion10
+func (c *Client) negotiateVersion(ctx context.Context) error {
+	c.mbimExVersion = mbimExVersion10
 
-	services := DeviceServicesRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, services.Request()); err != nil {
+	services := DeviceServicesRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, services.Request()); err != nil {
 		return fmt.Errorf("negotiating MBIM version: reading device services: %w", err)
 	}
 	if !services.Response.SupportsCID(ServiceMsBasicConnectExtensions, CIDVersion) {
@@ -17,24 +17,24 @@ func (r *Reader) negotiateVersion(ctx context.Context) error {
 	}
 
 	version := VersionRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		MBIMVersion:   mbimVersion10,
 		MBIMExVersion: hostMBIMExVersion,
 	}
-	if err := r.transmit(ctx, version.Request()); err != nil {
+	if err := c.transmit(ctx, version.Request()); err != nil {
 		return fmt.Errorf("negotiating MBIM version: %w", err)
 	}
-	r.mbimExVersion = min(version.Response.MBIMExVersion, hostMBIMExVersion)
+	c.mbimExVersion = min(version.Response.MBIMExVersion, hostMBIMExVersion)
 	return nil
 }
 
-func (r *Reader) usesUiccSlotID() bool {
-	return r.mbimExVersion >= mbimExVersion40
+func (c *Client) usesUiccSlotID() bool {
+	return c.mbimExVersion >= mbimExVersion40
 }
 
-func (r *Reader) subscriberReadySlotID() uint32 {
-	if r.usesUiccSlotID() {
-		return r.slot
+func (c *Client) subscriberReadySlotID() uint32 {
+	if c.usesUiccSlotID() {
+		return c.slot
 	}
 	return activeSubscriberSlot
 }

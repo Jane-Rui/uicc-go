@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/damonto/uicc-go/qcom"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 type fakeDialer struct {

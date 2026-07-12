@@ -633,7 +633,7 @@ func TestIPConfigurationInfoUnmarshalBinary(t *testing.T) {
 	}
 }
 
-func TestReaderOpenIMSPDN(t *testing.T) {
+func TestClientOpenIMSPDN(t *testing.T) {
 	tests := []struct {
 		name          string
 		mbimExVersion uint16
@@ -732,11 +732,11 @@ func TestReaderOpenIMSPDN(t *testing.T) {
 				}
 			}()
 
-			reader := &Reader{conn: client, mbimExVersion: tt.mbimExVersion}
+			mbimClient := &Client{conn: client, mbimExVersion: tt.mbimExVersion}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			session, err := reader.OpenIMSPDN(ctx, IMSPDNConfig{})
+			session, err := mbimClient.OpenIMSPDN(ctx, IMSPDNConfig{})
 			if err != nil {
 				t.Fatalf("OpenIMSPDN() error = %v", err)
 			}
@@ -772,7 +772,7 @@ func TestReaderOpenIMSPDN(t *testing.T) {
 	}
 }
 
-func TestReaderOpenIMSPDNValidatesSessionCapacity(t *testing.T) {
+func TestClientOpenIMSPDNValidatesSessionCapacity(t *testing.T) {
 	tests := []struct {
 		name        string
 		maxSessions uint32
@@ -816,11 +816,11 @@ func TestReaderOpenIMSPDNValidatesSessionCapacity(t *testing.T) {
 				}
 			}()
 
-			reader := &Reader{conn: client}
+			mbimClient := &Client{conn: client}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			_, err := reader.OpenIMSPDN(ctx, IMSPDNConfig{SessionID: tt.sessionID})
+			_, err := mbimClient.OpenIMSPDN(ctx, IMSPDNConfig{SessionID: tt.sessionID})
 			if err == nil || err.Error() != tt.want {
 				t.Fatalf("OpenIMSPDN() error = %v, want %q", err, tt.want)
 			}

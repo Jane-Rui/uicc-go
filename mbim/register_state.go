@@ -64,9 +64,9 @@ func (r *RegistrationStateInfo) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (r *Reader) RegistrationState(ctx context.Context) (RegistrationStateInfo, error) {
-	request := RegistrationStateRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) RegistrationState(ctx context.Context) (RegistrationStateInfo, error) {
+	request := RegistrationStateRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return RegistrationStateInfo{}, fmt.Errorf("reading MBIM registration state: %w", err)
 	}
 	return *request.Response, nil

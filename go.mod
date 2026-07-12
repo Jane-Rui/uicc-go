@@ -1,4 +1,4 @@
-module github.com/damonto/uicc-go
+module github.com/damonto/wwan-go
 
 go 1.26.3
 

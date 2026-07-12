@@ -1,0 +1,132 @@
+package qcom
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"time"
+)
+
+const (
+	DefaultRequestTimeout = 30 * time.Second
+	defaultCloseTimeout   = 5 * time.Second
+)
+
+// Client owns a QMI transport and lazily allocated service client IDs.
+type Client struct {
+	mu         sync.Mutex
+	transport  Transport
+	slot       uint8
+	catService ServiceType
+	clientIDs  map[ServiceType]uint8
+	txn        uint16
+	ctlTxn     uint8
+	closeOnce  sync.Once
+	closed     bool
+	closeErr   error
+}
+
+// Option configures a Client.
+type Option func(*config)
+
+type config struct {
+	slot uint8
+}
+
+type serviceBoundTransport interface {
+	QMIService() ServiceType
+}
+
+// WithSlot selects the physical UICC slot used by UIM and CAT operations.
+func WithSlot(slot uint8) Option {
+	return func(c *config) {
+		c.slot = slot
+	}
+}
+
+// NewClient creates a QCOM QMI client. Service client IDs are allocated on
+// first use and released by Close.
+func NewClient(transport Transport, opts ...Option) (*Client, error) {
+	if transport == nil {
+		return nil, errors.New("creating QCOM client: transport is nil")
+	}
+
+	cfg := config{slot: 1}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.slot < 1 || cfg.slot > 5 {
+		return nil, fmt.Errorf("creating QCOM client: slot %d is out of range", cfg.slot)
+	}
+
+	return &Client{
+		transport: transport,
+		slot:      cfg.slot,
+	}, nil
+}
+
+func (c *Client) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultCloseTimeout)
+	defer cancel()
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		transport := c.transport
+		if transport == nil {
+			c.closed = true
+			return
+		}
+
+		var releaseErr error
+		_, serviceBound := boundQMIService(transport)
+		if !serviceBound {
+			services := make([]ServiceType, 0, len(c.clientIDs))
+			for service := range c.clientIDs {
+				services = append(services, service)
+			}
+			slices.Sort(services)
+			for _, service := range services {
+				releaseErr = errors.Join(releaseErr, c.releaseServiceClientIDLocked(ctx, service, c.clientIDs[service]))
+			}
+		}
+		c.clientIDs = nil
+		c.catService = 0
+
+		closeErr := transport.Close()
+		c.transport = nil
+		c.closed = true
+		if releaseErr == nil {
+			c.closeErr = closeErr
+			return
+		}
+		c.closeErr = errors.Join(releaseErr, closeErr)
+	})
+	return c.closeErr
+}
+
+func boundQMIService(transport Transport) (ServiceType, bool) {
+	bound, ok := transport.(serviceBoundTransport)
+	if !ok {
+		return 0, false
+	}
+	return bound.QMIService(), true
+}
+
+func (c *Client) nextTransactionID(service ServiceType) uint16 {
+	if service == ServiceControl {
+		c.ctlTxn++
+		if c.ctlTxn == 0 {
+			c.ctlTxn++
+		}
+		return uint16(c.ctlTxn)
+	}
+
+	c.txn++
+	if c.txn == 0 {
+		c.txn++
+	}
+	return c.txn
+}

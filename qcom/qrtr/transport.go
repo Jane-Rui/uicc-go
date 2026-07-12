@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/damonto/uicc-go/qcom"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 type packetConn interface {

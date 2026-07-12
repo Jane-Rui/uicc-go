@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/damonto/uicc-go/qcom/tlv"
+	"github.com/damonto/wwan-go/qcom/tlv"
 )
 
 // ServiceType represents QMI service types.
@@ -46,9 +46,12 @@ const (
 	// WDS service commands
 	MessageWDSStartNetworkInterface MessageID = 0x0020
 	MessageWDSStopNetworkInterface  MessageID = 0x0021
+	MessageWDSCreateProfile         MessageID = 0x0027
+	MessageWDSDeleteProfile         MessageID = 0x0029
 	MessageWDSGetProfileList        MessageID = 0x002A
 	MessageWDSGetProfileSettings    MessageID = 0x002B
 	MessageWDSGetRuntimeSettings    MessageID = 0x002D
+	MessageWDSSetClientIPFamily     MessageID = 0x004D
 	MessageWDSLegacyBindMuxDataPort MessageID = 0x0089
 	MessageWDSBindMuxDataPort       MessageID = 0x00A2
 
@@ -119,15 +122,33 @@ const (
 	QMIResultFailure QMIResult = 0x0001 // Failure
 )
 
-// WDSIPFamily is the QMI WDS IP family preference value.
+// WDSIPFamily identifies the address family negotiated for an active WDS call.
 type WDSIPFamily uint8
 
 const (
-	WDSIPFamilyIPv4        WDSIPFamily = 4
-	WDSIPFamilyIPv6        WDSIPFamily = 6
-	WDSIPFamilyUnspecified WDSIPFamily = 8
+	WDSIPFamilyIPv4 WDSIPFamily = 4
+	WDSIPFamilyIPv6 WDSIPFamily = 6
+)
 
-	WDSIPFamilyIPv4v6 = WDSIPFamilyUnspecified
+// WDSIPPreference selects the address family requested when starting a WDS
+// call. The zero value omits the optional QMI TLV and lets the modem use its
+// default. QMI value 8 means unspecified; it is not an active dual-stack
+// family value.
+type WDSIPPreference uint8
+
+const (
+	WDSIPPreferenceDefault     WDSIPPreference = 0
+	WDSIPPreferenceIPv4        WDSIPPreference = 4
+	WDSIPPreferenceIPv6        WDSIPPreference = 6
+	WDSIPPreferenceUnspecified WDSIPPreference = 8
+)
+
+// WDSCallType identifies the origin of a WDS packet-data call.
+type WDSCallType uint8
+
+const (
+	WDSCallTypeLaptop WDSCallType = iota
+	WDSCallTypeEmbedded
 )
 
 // WDSTechnologyPreference is the WDS technology preference bit mask.
@@ -264,10 +285,18 @@ type WDADataFormat struct {
 
 // WDSMuxDataPort describes the logical data channel assigned to a WDS client.
 type WDSMuxDataPort struct {
-	Endpoint *DataEndpoint
-	MuxID    uint8
-	Reversed bool
+	Endpoint   *DataEndpoint
+	MuxID      uint8
+	Reversed   bool
+	ClientType WDSClientType
 }
+
+type WDSClientType uint32
+
+const (
+	WDSClientTypeReserved WDSClientType = iota
+	WDSClientTypeTethered
+)
 
 // WDSProfileType identifies a modem data-profile technology family.
 type WDSProfileType uint8
@@ -276,6 +305,16 @@ const (
 	WDSProfileType3GPP WDSProfileType = iota
 	WDSProfileType3GPP2
 	WDSProfileTypeEPC
+)
+
+// WDSPDPType identifies the packet data protocol stored in a 3GPP profile.
+type WDSPDPType uint8
+
+const (
+	WDSPDPTypeIPv4 WDSPDPType = iota
+	WDSPDPTypePPP
+	WDSPDPTypeIPv6
+	WDSPDPTypeIPv4v6
 )
 
 // WDSProfileID identifies a stored modem data profile.
@@ -338,6 +377,9 @@ type WDSRuntimeSettingsMask uint32
 
 const (
 	WDSRuntimeMaskIPAddress     WDSRuntimeSettingsMask = 0x00000100
+	WDSRuntimeMaskDNSAddress    WDSRuntimeSettingsMask = 0x00000010
+	WDSRuntimeMaskGatewayInfo   WDSRuntimeSettingsMask = 0x00000200
+	WDSRuntimeMaskMTU           WDSRuntimeSettingsMask = 0x00002000
 	WDSRuntimeMaskPCSCFUsingPCO WDSRuntimeSettingsMask = 0x00000400
 	WDSRuntimeMaskPCSCFServer   WDSRuntimeSettingsMask = 0x00000800
 	WDSRuntimeMaskIPFamily      WDSRuntimeSettingsMask = 0x00008000
@@ -348,15 +390,27 @@ const (
 		WDSRuntimeMaskPCSCFServer |
 		WDSRuntimeMaskIPFamily |
 		WDSRuntimeMaskIMCNFlag
+
+	WDSRuntimeRequestedNetworkSettings = WDSRuntimeMaskDNSAddress |
+		WDSRuntimeMaskIPAddress |
+		WDSRuntimeMaskGatewayInfo |
+		WDSRuntimeMaskMTU |
+		WDSRuntimeMaskIPFamily
 )
 
 // WDSRuntimeSettings holds IMS PDN addressing and P-CSCF data from WDS.
 type WDSRuntimeSettings struct {
-	LocalIPv4 net.IP
-	LocalIPv6 net.IP
-	PCSCFIPs  []net.IP
-	IPFamily  WDSIPFamily
-	IMCN      bool
+	LocalIPv4        net.IP
+	LocalIPv6        net.IP
+	IPv4Gateway      net.IP
+	IPv4SubnetMask   net.IP
+	IPv6Gateway      net.IP
+	IPv6PrefixLength uint8
+	DNS              []net.IP
+	MTU              uint32
+	PCSCFIPs         []net.IP
+	IPFamily         WDSIPFamily
+	IMCN             bool
 }
 
 // DMSOperatingMode is the QMI DMS modem operating mode.
@@ -524,20 +578,296 @@ type IndicationTransport interface {
 	Indications(ctx context.Context, service ServiceType, clientID uint8, id MessageID) (<-chan Indication, error)
 }
 
-func RequestDeadline(ctx context.Context, timeout time.Duration) (time.Time, bool) {
-	if deadline, ok := ctx.Deadline(); ok {
-		if timeout <= 0 {
-			return deadline, true
-		}
+type FileStructure byte
 
-		timeoutDeadline := time.Now().Add(timeout)
-		if deadline.Before(timeoutDeadline) {
-			return deadline, true
-		}
-		return timeoutDeadline, true
-	}
-	if timeout <= 0 {
-		return time.Time{}, false
-	}
-	return time.Now().Add(timeout), true
+const (
+	FileStructureTransparent FileStructure = 0x41
+	FileStructureLinearFixed FileStructure = 0x42
+)
+
+type FileType byte
+
+const (
+	FileTypeWorkingEF FileType = 0x21
+	FileTypeDFOrADF   FileType = 0x38
+)
+
+type CardState byte
+
+const (
+	CardStateAbsent CardState = iota
+	CardStatePresent
+	CardStateError
+)
+
+type PhysicalCardState uint32
+
+const (
+	PhysicalCardStateUnknown PhysicalCardState = iota
+	PhysicalCardStateAbsent
+	PhysicalCardStatePresent
+)
+
+type SlotState uint32
+
+const (
+	SlotStateInactive SlotState = iota
+	SlotStateActive
+)
+
+type CardProtocol uint32
+
+const (
+	CardProtocolUnknown CardProtocol = iota
+	CardProtocolICC
+	CardProtocolUICC
+)
+
+type QMIFileType byte
+
+const (
+	QMIFileTypeTransparent QMIFileType = iota
+	QMIFileTypeCyclic
+	QMIFileTypeLinearFixed
+	QMIFileTypeDedicated
+	QMIFileTypeMaster
+)
+
+type PINState byte
+
+const (
+	PINStateNotInitialized PINState = iota
+	PINStateEnabledNotVerified
+	PINStateEnabledVerified
+	PINStateDisabled
+	PINStateBlocked
+	PINStatePermanentlyBlocked
+)
+
+type CardError byte
+
+const (
+	CardErrorUnknown CardError = iota
+	CardErrorPowerDown
+	CardErrorPoll
+	CardErrorNoATRReceived
+	CardErrorVoltageMismatch
+	CardErrorParity
+	CardErrorPossiblyRemoved
+	CardErrorTechnical
+)
+
+type ApplicationType byte
+
+const (
+	ApplicationTypeUnknown ApplicationType = iota
+	ApplicationTypeSIM
+	ApplicationTypeUSIM
+	ApplicationTypeRUIM
+	ApplicationTypeCSIM
+	ApplicationTypeISIM
+)
+
+type ApplicationState byte
+
+const (
+	ApplicationStateUnknown ApplicationState = iota
+	ApplicationStateDetected
+	ApplicationStatePIN1OrUPINRequired
+	ApplicationStatePUK1OrUPINRequired
+	ApplicationStateCheckPersonalization
+	ApplicationStatePIN1Blocked
+	ApplicationStateIllegal
+	ApplicationStateReady
+)
+
+type PersonalizationState byte
+
+const (
+	PersonalizationStateUnknown PersonalizationState = iota
+	PersonalizationStateInProgress
+	PersonalizationStateReady
+	PersonalizationStateCodeRequired
+	PersonalizationStatePUKCodeRequired
+	PersonalizationStatePermanentlyBlocked
+)
+
+type PersonalizationFeature byte
+
+const (
+	PersonalizationFeatureGWNetwork PersonalizationFeature = iota
+	PersonalizationFeatureGWNetworkSubset
+	PersonalizationFeatureGWServiceProvider
+	PersonalizationFeatureGWCorporate
+	PersonalizationFeatureGWUIM
+	PersonalizationFeatureOneXNetworkType1
+	PersonalizationFeatureOneXNetworkType2
+	PersonalizationFeatureOneXHRPD
+	PersonalizationFeatureOneXServiceProvider
+	PersonalizationFeatureOneXCorporate
+	PersonalizationFeatureOneXRUIM
+	PersonalizationFeatureGWServiceProviderName
+	PersonalizationFeatureGWSPAndEHPLMN
+	PersonalizationFeatureGWICCID
+	PersonalizationFeatureGWIMPI
+	PersonalizationFeatureGWNetworkSubsetServiceProvider
+	PersonalizationFeatureGWCarrier
+)
+
+type CATConfigMode uint8
+
+const (
+	CATConfigDisabled      CATConfigMode = 0x00
+	CATConfigGobi          CATConfigMode = 0x01
+	CATConfigAndroid       CATConfigMode = 0x02
+	CATConfigDecoded       CATConfigMode = 0x03
+	CATConfigDecodedPull   CATConfigMode = 0x04
+	CATConfigCustomRaw     CATConfigMode = 0x05
+	CATConfigCustomDecoded CATConfigMode = 0x06
+)
+
+type Session uint8
+
+const (
+	SessionPrimaryGWProvisioning Session = 0
+
+	SessionNonProvisioningSlot1 Session = 4
+	SessionNonProvisioningSlot2 Session = 5
+	SessionCardSlot1            Session = 6
+	SessionCardSlot2            Session = 7
+
+	SessionNonProvisioningSlot3 Session = 16
+	SessionNonProvisioningSlot4 Session = 17
+	SessionNonProvisioningSlot5 Session = 18
+	SessionCardSlot3            Session = 19
+	SessionCardSlot4            Session = 20
+	SessionCardSlot5            Session = 21
+)
+
+type FileAttributes struct {
+	FileStructure FileStructure
+	FileType      FileType
+	RecordSize    uint16
+	RecordCount   uint16
+	FileSize      uint16
+}
+
+type File struct {
+	Session Session
+	AID     []byte
+	Path    []byte
+}
+
+type TransparentRead struct {
+	File   File
+	Offset uint16
+	Length uint16
+}
+
+type RecordRead struct {
+	File   File
+	Record uint16
+	Length uint16
+}
+
+type RecordWrite struct {
+	File   File
+	Record uint16
+	Data   []byte
+}
+
+type AuthContext byte
+
+const (
+	AuthContext3G     AuthContext = 3
+	AuthContextIMSAKA AuthContext = 11
+)
+
+type AuthenticateRequest struct {
+	Session Session
+	AID     []byte
+	Context AuthContext
+	Rand    []byte
+	AUTN    []byte
+}
+
+type EnvelopeResponse struct {
+	SW1  byte
+	SW2  byte
+	Data []byte
+}
+
+type PowerOnSIMRequest struct {
+	Slot                uint8
+	IgnoreHotSwapSwitch bool
+}
+
+type ChangeProvisioningSessionRequest struct {
+	Session  Session
+	Activate bool
+	Slot     uint8
+	AID      []byte
+}
+
+type OpenLogicalChannelRequest struct {
+	AID []byte
+}
+
+type OpenLogicalChannelResponse struct {
+	Channel uint8
+}
+
+type CloseLogicalChannelRequest struct {
+	Channel uint8
+}
+
+type CloseLogicalChannelResponse struct{}
+
+type SendAPDURequest struct {
+	Command []byte
+}
+
+type SendAPDUResponse struct {
+	Response []byte
+}
+
+type RefreshStage uint8
+
+const (
+	RefreshStageWaitForOK RefreshStage = iota
+	RefreshStageStart
+	RefreshStageEndWithSuccess
+	RefreshStageEndWithFailure
+)
+
+type RefreshMode uint8
+
+const (
+	RefreshModeReset RefreshMode = iota
+	RefreshModeInit
+	RefreshModeInitFCN
+	RefreshModeFCN
+	RefreshModeInitFullFCN
+	RefreshModeApplicationReset
+	RefreshMode3GReset
+)
+
+type RefreshFile struct {
+	FileID uint16
+	Path   []byte
+}
+
+type RefreshEvent struct {
+	Stage   RefreshStage
+	Mode    RefreshMode
+	Session Session
+	AID     []byte
+	Files   []RefreshFile
+}
+
+type RefreshRegisterRequest struct {
+	Session     Session
+	AID         []byte
+	VoteForInit bool
+	Files       []RefreshFile
 }

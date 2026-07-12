@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/damonto/uicc-go/qcom"
-	"github.com/damonto/uicc-go/qcom/tlv"
+	"github.com/damonto/wwan-go/qcom"
+	"github.com/damonto/wwan-go/qcom/tlv"
 )
 
 var (

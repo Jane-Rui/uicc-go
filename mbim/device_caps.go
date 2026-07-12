@@ -43,9 +43,9 @@ func (r *DeviceCapsInfo) UnmarshalBinary(data []byte) error {
 }
 
 // DeviceCaps reads the modem's IP-session capacity.
-func (r *Reader) DeviceCaps(ctx context.Context) (DeviceCapsInfo, error) {
-	request := DeviceCapsRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) DeviceCaps(ctx context.Context) (DeviceCapsInfo, error) {
+	request := DeviceCapsRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return DeviceCapsInfo{}, fmt.Errorf("reading MBIM device capabilities: %w", err)
 	}
 	return *request.Response, nil

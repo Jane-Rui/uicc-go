@@ -12,7 +12,7 @@ import (
 
 const defaultCloseTimeout = 5 * time.Second
 
-type Reader struct {
+type Client struct {
 	conn               Conn
 	slot               uint32
 	mbimExVersion      uint16
@@ -64,16 +64,16 @@ func WithSlot(slot int) Option {
 	}
 }
 
-func Open(ctx context.Context, opts ...Option) (*Reader, error) {
+func Open(ctx context.Context, opts ...Option) (*Client, error) {
 	cfg := config{slot: 1}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 	if cfg.slot < 1 {
-		return nil, fmt.Errorf("opening MBIM reader: slot %d is out of range", cfg.slot)
+		return nil, fmt.Errorf("opening MBIM client: slot %d is out of range", cfg.slot)
 	}
 	if cfg.dialer == nil {
-		return nil, errors.New("opening MBIM reader: dialer is nil")
+		return nil, errors.New("opening MBIM client: dialer is nil")
 	}
 
 	device := dialerDevice(cfg.dialer)
@@ -86,17 +86,17 @@ func Open(ctx context.Context, opts ...Option) (*Reader, error) {
 		return nil, err
 	}
 
-	reader := &Reader{
+	client := &Client{
 		conn:               conn,
 		slot:               uint32(cfg.slot - 1),
 		proxy:              dialerUsesProxy(cfg.dialer),
 		maxControlTransfer: connMaxControlTransfer(conn),
 	}
-	if err := reader.connect(ctx, device); err != nil {
+	if err := client.connect(ctx, device); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	return reader, nil
+	return client, nil
 }
 
 func dialerDevice(d Dialer) string {
@@ -107,70 +107,70 @@ func dialerDevice(d Dialer) string {
 	return ""
 }
 
-func (r *Reader) connect(ctx context.Context, device string) error {
-	if r.proxy {
-		if err := r.configureProxy(ctx, device); err != nil {
+func (c *Client) connect(ctx context.Context, device string) error {
+	if c.proxy {
+		if err := c.configureProxy(ctx, device); err != nil {
 			return err
 		}
 	}
-	if err := r.openDevice(ctx); err != nil {
+	if err := c.openDevice(ctx); err != nil {
 		return err
 	}
-	if err := r.startReceiver(); err != nil {
+	if err := c.startReceiver(); err != nil {
 		return err
 	}
-	if err := r.negotiateVersion(ctx); err != nil {
+	if err := c.negotiateVersion(ctx); err != nil {
 		return err
 	}
-	if !r.usesUiccSlotID() {
-		if err := r.ensureSlotActivated(ctx); err != nil {
+	if !c.usesUiccSlotID() {
+		if err := c.ensureSlotActivated(ctx); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Reader) configureProxy(ctx context.Context, device string) error {
+func (c *Client) configureProxy(ctx context.Context, device string) error {
 	request := ProxyConfigRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		DevicePath:    device,
 		Timeout:       30,
 	}
-	if err := request.Request().Transmit(ctx, r.conn); err != nil {
+	if err := request.Request().Transmit(ctx, c.conn); err != nil {
 		if errors.Is(err, io.EOF) {
-			return fmt.Errorf("opening MBIM reader: device %s is not connected", device)
+			return fmt.Errorf("opening MBIM client: device %s is not connected", device)
 		}
 		return fmt.Errorf("configuring MBIM proxy for %s: %w", device, err)
 	}
 	return nil
 }
 
-func (r *Reader) openDevice(ctx context.Context) error {
+func (c *Client) openDevice(ctx context.Context) error {
 	request := OpenDeviceRequest{
-		TransactionID:      r.nextTransactionID(),
-		MaxControlTransfer: uint32(r.maxControlTransfer),
+		TransactionID:      c.nextTransactionID(),
+		MaxControlTransfer: uint32(c.maxControlTransfer),
 	}
-	if err := request.Request().Transmit(ctx, r.conn); err != nil {
+	if err := request.Request().Transmit(ctx, c.conn); err != nil {
 		return fmt.Errorf("opening MBIM device: %w", err)
 	}
 	return nil
 }
 
-func (r *Reader) Close() error {
+func (c *Client) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultCloseTimeout)
 	defer cancel()
 
-	if !r.beginClose() {
+	if !c.beginClose() {
 		return nil
 	}
 
-	request := CloseRequest{TransactionID: r.nextTransactionID()}
-	err := r.transmitClosing(ctx, request.Request())
-	closeErr := r.conn.Close()
-	r.finishClose()
+	request := CloseRequest{TransactionID: c.nextTransactionID()}
+	err := c.transmitClosing(ctx, request.Request())
+	closeErr := c.conn.Close()
+	c.finishClose()
 	return errors.Join(err, closeErr)
 }
 
-func (r *Reader) nextTransactionID() uint32 {
-	return r.txn.Add(1)
+func (c *Client) nextTransactionID() uint32 {
+	return c.txn.Add(1)
 }

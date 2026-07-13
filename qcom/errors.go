@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/damonto/uicc-go/qcom/tlv"
+	"github.com/damonto/wwan-go/qcom/tlv"
 )
 
 var (

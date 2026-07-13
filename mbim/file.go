@@ -9,17 +9,17 @@ import (
 
 var masterFilePath = []byte{0x3F, 0x00}
 
-func (r *Reader) FileAttributes(ctx context.Context, file FileRef) (FileAttributes, error) {
+func (c *Client) FileAttributes(ctx context.Context, file FileRef) (FileAttributes, error) {
 	if len(file.Path) == 0 {
 		return FileAttributes{}, errors.New("reading MBIM file attributes: path is empty")
 	}
 
 	request := FileStatusRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		ApplicationID: slices.Clone(file.AID),
 		FilePath:      filePath(file),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return FileAttributes{}, fmt.Errorf("reading MBIM file attributes %X: %w", file.Path, err)
 	}
 	if err := cardStatusError(request.Response.StatusWord1, request.Response.StatusWord2); err != nil {
@@ -28,14 +28,14 @@ func (r *Reader) FileAttributes(ctx context.Context, file FileRef) (FileAttribut
 	return fileStatusAttributes(request.Response), nil
 }
 
-func (r *Reader) ReadTransparent(ctx context.Context, req TransparentRead) ([]byte, error) {
+func (c *Client) ReadTransparent(ctx context.Context, req TransparentRead) ([]byte, error) {
 	if len(req.File.Path) == 0 {
 		return nil, errors.New("reading MBIM transparent file: path is empty")
 	}
 
 	length := req.Length
 	if length == 0 {
-		attrs, err := r.FileAttributes(ctx, req.File)
+		attrs, err := c.FileAttributes(ctx, req.File)
 		if err != nil {
 			return nil, err
 		}
@@ -52,13 +52,13 @@ func (r *Reader) ReadTransparent(ctx context.Context, req TransparentRead) ([]by
 	}
 
 	request := ReadBinaryRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		ApplicationID: slices.Clone(req.File.AID),
 		FilePath:      filePath(req.File),
 		Offset:        uint32(req.Offset),
 		Size:          uint32(length),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, fmt.Errorf("reading MBIM transparent file %X: %w", req.File.Path, err)
 	}
 	if err := cardStatusError(request.Response.StatusWord1, request.Response.StatusWord2); err != nil {
@@ -67,7 +67,7 @@ func (r *Reader) ReadTransparent(ctx context.Context, req TransparentRead) ([]by
 	return slices.Clone(request.Response.Data), nil
 }
 
-func (r *Reader) ReadRecord(ctx context.Context, req RecordRead) ([]byte, error) {
+func (c *Client) ReadRecord(ctx context.Context, req RecordRead) ([]byte, error) {
 	if len(req.File.Path) == 0 {
 		return nil, errors.New("reading MBIM record file: path is empty")
 	}
@@ -75,7 +75,7 @@ func (r *Reader) ReadRecord(ctx context.Context, req RecordRead) ([]byte, error)
 		return nil, errors.New("reading MBIM record file: record number is zero")
 	}
 
-	attrs, err := r.FileAttributes(ctx, req.File)
+	attrs, err := c.FileAttributes(ctx, req.File)
 	if err != nil {
 		return nil, err
 	}
@@ -84,12 +84,12 @@ func (r *Reader) ReadRecord(ctx context.Context, req RecordRead) ([]byte, error)
 	}
 
 	request := ReadRecordRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		ApplicationID: slices.Clone(req.File.AID),
 		FilePath:      filePath(req.File),
 		Record:        uint32(req.Record),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, fmt.Errorf("reading MBIM record file %X record %d: %w", req.File.Path, req.Record, err)
 	}
 	if err := cardStatusError(request.Response.StatusWord1, request.Response.StatusWord2); err != nil {

@@ -201,12 +201,12 @@ func (r *IPConfigurationInfo) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (r *Reader) IPConfiguration(ctx context.Context, sessionID uint32) (IPConfigurationInfo, error) {
+func (c *Client) IPConfiguration(ctx context.Context, sessionID uint32) (IPConfigurationInfo, error) {
 	request := IPConfigurationRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		SessionID:     sessionID,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return IPConfigurationInfo{}, fmt.Errorf("reading MBIM IP configuration: %w", err)
 	}
 	resp := *request.Response

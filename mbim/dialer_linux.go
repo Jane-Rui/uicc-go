@@ -9,7 +9,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/damonto/uicc-go/cdcwdm"
+	"github.com/damonto/wwan-go/cdcwdm"
 )
 
 type DirectDialer struct {

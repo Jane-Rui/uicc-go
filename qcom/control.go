@@ -3,7 +3,7 @@ package qcom
 import (
 	"errors"
 
-	"github.com/damonto/uicc-go/qcom/tlv"
+	"github.com/damonto/wwan-go/qcom/tlv"
 )
 
 type InternalOpenRequest struct {

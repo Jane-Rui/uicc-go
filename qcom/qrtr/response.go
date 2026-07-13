@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/damonto/uicc-go/qcom"
-	"github.com/damonto/uicc-go/qcom/tlv"
+	"github.com/damonto/wwan-go/qcom"
+	"github.com/damonto/wwan-go/qcom/tlv"
 )
 
 type Response struct {

@@ -1,14 +1,15 @@
-# uicc-go
+# wwan-go
 
-`uicc-go` is a Go protocol library for working with UICC, USIM, ISIM, and SIM access paths.
+`wwan-go` is a Go protocol library for controlling cellular modems over QMI,
+QRTR, MBIM, AT, and card-facing UICC access paths.
 
-The repository separates protocol packages from USIM business logic:
+The repository separates modem protocols from SIM card business logic:
 
 - Top-level protocol packages implement concrete primitives such as AT `+CSIM`, PC/SC CCID APDU transport, MBIM UICC low-level access, QMI UIM, and QRTR QMI transport.
 - `apdu` implements APDU request/response encoding.
-- `usim` adapts readers into higher-level USIM and ISIM operations such as loading ICCID/IMSI identities, AKA, EAP-AKA, SMS-PP download, and SIM Toolkit.
+- `sim` adapts readers into higher-level SIM, USIM, and ISIM operations such as loading ICCID/IMSI identities, AKA, EAP-AKA, SMS-PP download, and SIM Toolkit.
 
-The protocol readers do not depend on `usim`. Use `usim` only when you want card-level business behavior on top of a reader.
+The protocol clients do not depend on `sim`. Use `sim` only when you want card-level business behavior on top of a reader.
 
 ## Status
 
@@ -36,7 +37,7 @@ The implementation is pure Go. It does not use cgo and does not link against `li
 Install:
 
 ```sh
-go get github.com/damonto/uicc-go
+go get github.com/damonto/wwan-go
 ```
 
 ## Package Layout
@@ -47,17 +48,16 @@ at                           AT +CSIM APDU reader
 ccid                         PC/SC CCID APDU reader
 cdcwdm                       Linux cdc-wdm connection primitive
 mbim                         MBIM protocol, proxy/direct dialers, UICC access
-qcom                         Shared QCOM QMI/QMUX constants and transport contracts
+qcom                         QCOM client, QMI service primitives, constants, and transport contracts
 qcom/qmi                     QMI/QMUX transport, proxy/direct dialers
 qcom/qrtr                    QRTR transport for QMI services
 qcom/tlv                     QCOM QMI TLV types, codecs, constructors, and lookup helpers
-qcom/uim                     QMI UIM primitives
-usim                         USIM/ISIM card loading and high-level operations
-usim/card                    Card-facing interfaces consumed by usim
-usim/command                 APDU command helpers used by usim
-usim/simfile                 SIM file parsers
-usim/stk                     SIM Toolkit commands, envelopes, terminal profile, and BIP
-usim/tlv                     BER-TLV helpers
+sim                          SIM/USIM/ISIM card loading and high-level operations
+sim/card                     Card-facing interfaces consumed by sim
+sim/command                  APDU command helpers used by sim
+sim/simfile                  SIM file parsers
+sim/stk                      SIM Toolkit commands, envelopes, terminal profile, and BIP
+sim/tlv                      BER-TLV helpers
 ```
 
 ## Transport Model
@@ -104,7 +104,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/damonto/uicc-go/at"
+	"github.com/damonto/wwan-go/at"
 )
 
 func main() {
@@ -133,7 +133,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/damonto/uicc-go/ccid"
+	"github.com/damonto/wwan-go/ccid"
 )
 
 func main() {
@@ -161,9 +161,12 @@ func main() {
 }
 ```
 
-## QCOM UIM over QMI
+## QCOM Client over QMI
 
-Use `qmi.Open` to create a QMI transport, then `uim.New` to allocate a UIM client and expose QMI UIM primitives.
+Use `qmi.Open` to create a QMI transport, then `qcom.NewClient` to expose UIM, CAT, WDS, NAS, DMS, WDA, and IMS services.
+The client lazily allocates one client ID for each QMI service it uses and reuses that ID until `Close`.
+Always close the client so its cached service client IDs are explicitly released through `qmi-proxy`.
+Long-running PDN and IMS sessions own additional client IDs and must also be closed independently.
 
 ```go
 package main
@@ -172,8 +175,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/damonto/uicc-go/qcom/qmi"
-	"github.com/damonto/uicc-go/qcom/uim"
+	"github.com/damonto/wwan-go/qcom"
+	"github.com/damonto/wwan-go/qcom/qmi"
 )
 
 func main() {
@@ -184,13 +187,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	reader, err := uim.New(ctx, transport, uim.WithSlot(1))
+	client, err := qcom.NewClient(transport, qcom.WithSlot(1))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer reader.Close()
+	defer client.Close()
 
-	status, err := reader.CardStatus(ctx)
+	status, err := client.CardStatus(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -204,7 +207,7 @@ Direct mode:
 transport, err := qmi.Open(ctx, qmi.WithDirect("/dev/cdc-wdm0"))
 ```
 
-## QCOM UIM over QRTR
+## QCOM Client over QRTR
 
 QRTR uses the top-level `qcom/qrtr` package and is not nested under `qmi`.
 
@@ -215,8 +218,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/damonto/uicc-go/qcom/qrtr"
-	"github.com/damonto/uicc-go/qcom/uim"
+	"github.com/damonto/wwan-go/qcom"
+	"github.com/damonto/wwan-go/qcom/qrtr"
 )
 
 func main() {
@@ -227,13 +230,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	reader, err := uim.New(ctx, transport, uim.WithSlot(1))
+	client, err := qcom.NewClient(transport, qcom.WithSlot(1))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer reader.Close()
+	defer client.Close()
 
-	status, err := reader.CardStatus(ctx)
+	status, err := client.CardStatus(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -252,19 +255,19 @@ import (
 	"context"
 	"log"
 
-	"github.com/damonto/uicc-go/mbim"
+	"github.com/damonto/wwan-go/mbim"
 )
 
 func main() {
 	ctx := context.Background()
 
-	reader, err := mbim.Open(ctx, mbim.WithProxy("/dev/cdc-wdm0"), mbim.WithSlot(1))
+	client, err := mbim.Open(ctx, mbim.WithProxy("/dev/cdc-wdm0"), mbim.WithSlot(1))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer reader.Close()
+	defer client.Close()
 
-	apps, err := reader.ListApplications(ctx)
+	apps, err := client.ListApplications(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -277,12 +280,12 @@ func main() {
 Direct mode:
 
 ```go
-reader, err := mbim.Open(ctx, mbim.WithDirect("/dev/cdc-wdm0"), mbim.WithSlot(1))
+client, err := mbim.Open(ctx, mbim.WithDirect("/dev/cdc-wdm0"), mbim.WithSlot(1))
 ```
 
-## USIM Adaptation
+## SIM Adaptation
 
-`usim` consumes small card-facing interfaces from `usim/card`. It can work over AT, CCID, QMI UIM, or MBIM after adaptation.
+`sim` consumes small card-facing interfaces from `sim/card`. It can work over AT, CCID, QMI UIM, or MBIM after adaptation.
 
 APDU transports such as AT and CCID can be wrapped directly:
 
@@ -294,8 +297,8 @@ import (
 	"log"
 	"log/slog"
 
-	"github.com/damonto/uicc-go/at"
-	"github.com/damonto/uicc-go/usim"
+	"github.com/damonto/wwan-go/at"
+	"github.com/damonto/wwan-go/sim"
 )
 
 func main() {
@@ -306,12 +309,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	reader, err := usim.NewReader(tx)
+	reader, err := sim.NewReader(tx)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	card, err := usim.New(ctx, reader, slog.Default())
+	card, err := sim.New(ctx, reader, slog.Default())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -324,34 +327,34 @@ func main() {
 Pass a logger when the caller owns logging:
 
 ```go
-card, err := usim.New(ctx, reader, logger)
+card, err := sim.New(ctx, reader, logger)
 ```
 
-QMI UIM can be adapted with `usim.NewQCOM`:
+QCOM can be adapted with `sim.NewQCOM`:
 
 ```go
 transport, err := qmi.Open(ctx, qmi.WithProxy("/dev/cdc-wdm0"))
 if err != nil {
 	return err
 }
-uimReader, err := uim.New(ctx, transport, uim.WithSlot(1))
+qcomClient, err := qcom.NewClient(transport, qcom.WithSlot(1))
 if err != nil {
 	return err
 }
-reader, err := usim.NewQCOM(uimReader)
+reader, err := sim.NewQCOM(qcomClient)
 ```
 
-MBIM can be adapted with `usim.NewMBIM`:
+MBIM can be adapted with `sim.NewMBIM`:
 
 ```go
-mbimReader, err := mbim.Open(ctx, mbim.WithProxy("/dev/cdc-wdm0"), mbim.WithSlot(1))
+mbimClient, err := mbim.Open(ctx, mbim.WithProxy("/dev/cdc-wdm0"), mbim.WithSlot(1))
 if err != nil {
 	return err
 }
-reader, err := usim.NewMBIM(mbimReader)
+reader, err := sim.NewMBIM(mbimClient)
 ```
 
-Once loaded, `*usim.Card` exposes identity and authentication helpers:
+Once loaded, `*sim.Card` exposes identity and authentication helpers:
 
 ```go
 result, err := card.AKA(ctx, rand, autn)
@@ -360,24 +363,24 @@ result, err := card.EAPAKA(ctx, rand, autn)
 
 ## SIM Toolkit
 
-STK hangs off the loaded card. The transport can be APDU (`usim.Reader` over AT or CCID), QCOM UIM, or MBIM; application code uses the same `card.STK()` entry point.
+STK hangs off the loaded card. The transport can be APDU (`sim.Reader` over AT or CCID), QCOM UIM, or MBIM; application code uses the same `card.STK()` entry point.
 
-STK command and response types live in `github.com/damonto/uicc-go/usim/stk`:
+STK command and response types live in `github.com/damonto/wwan-go/sim/stk`:
 
 ```go
 transport, err := qmi.Open(ctx, qmi.WithProxy("/dev/cdc-wdm0"))
 if err != nil {
 	return err
 }
-uimReader, err := uim.New(ctx, transport, uim.WithSlot(1))
+qcomClient, err := qcom.NewClient(transport, qcom.WithSlot(1))
 if err != nil {
 	return err
 }
-reader, err := usim.NewQCOM(uimReader)
+reader, err := sim.NewQCOM(qcomClient)
 if err != nil {
 	return err
 }
-card, err := usim.New(ctx, reader, slog.Default())
+card, err := sim.New(ctx, reader, slog.Default())
 if err != nil {
 	return err
 }
@@ -388,7 +391,7 @@ if err != nil {
 	return err
 }
 
-return toolkit.Run(ctx, usim.STKCallbacks{
+return toolkit.Run(ctx, sim.STKCallbacks{
 	DisplayText: func(ctx context.Context, cmd stk.DisplayTextCommand) (stk.TerminalResponse, error) {
 		log.Print(cmd.Text.Value)
 		return stk.OK(), nil
@@ -415,7 +418,7 @@ Bearer Independent Protocol is built in for TCP and UDP client channels. The STK
 Transport notes:
 
 - APDU transports use `TERMINAL PROFILE`, `STATUS`, `FETCH`, `TERMINAL RESPONSE`, and `ENVELOPE`. Polling is used when the reader has no proactive indication path.
-- QCOM uses CAT/CAT2 raw proactive-command indications and sends raw terminal responses. The high-level `usim.QCOM` adapter registers event reports for the active run and does not change persistent modem CAT configuration.
+- QCOM uses CAT/CAT2 raw proactive-command indications and sends raw terminal responses. The high-level `sim.QCOM` adapter registers event reports for the active run and does not change persistent modem CAT configuration.
 - If an operator explicitly calls QMI CAT `SetConfiguration` with a custom terminal profile, `GetConfiguration` can confirm the modem setting immediately, but the UICC may not see changed terminal-profile bits until the next UICC initialization. Some cards support additional terminal profile after activation; many real deployments still require an explicit SIM power cycle. The library does not power-cycle SIMs implicitly.
 - MBIM uses STK PAC, terminal response, and envelope CIDs. The host PAC profile is cleared when `Run` exits.
 
@@ -425,7 +428,7 @@ On Qualcomm modems, CAT/CAT2 event registration is owned by QMI CAT client IDs. 
 
 When the modem is shared with other host software, prefer `qmi-proxy` and use CAT service-state probing before taking over ownership. The safe takeover flow is:
 
-1. Allocate your CAT2 client through the normal `uim.Reader`.
+1. Allocate your CAT2 client through the normal `qcom.Client`.
 2. Try `SET_EVENT_REPORT` once.
 3. If the response reports a raw event conflict, read CAT `GET_SERVICE_STATE`.
 4. Probe candidate CAT2 CIDs with `GET_SERVICE_STATE` and check `raw_client_mask`.
@@ -435,15 +438,15 @@ When the modem is shared with other host software, prefer `qmi-proxy` and use CA
 The helper below implements that flow:
 
 ```go
-callbacks := usim.STKCallbacks{
+callbacks := sim.STKCallbacks{
 	DisplayText: func(ctx context.Context, cmd stk.DisplayTextCommand) (stk.TerminalResponse, error) {
 		log.Print(cmd.Text.Value)
 		return stk.OK(), nil
 	},
 }
-profile := usim.ProfileFromCallbacks(callbacks)
+profile := sim.ProfileFromCallbacks(callbacks)
 
-claim, err := uim.NewCAT(uimReader).ForceClaimEvents(ctx, uim.CATEventClaimConfig{
+claim, err := qcom.NewCAT(qcomClient).ForceClaimEvents(ctx, qcom.CATEventClaimConfig{
 	RawMask:          profile.QMIEventMask(),
 	FullFunctionMask: profile.QMIFullFunctionMask(),
 })
@@ -461,7 +464,7 @@ if err != nil {
 return toolkit.Run(ctx, callbacks)
 ```
 
-Keep the `uim.Reader` open for as long as the STK run is active. Closing it releases the CAT2 client and drops the claimed event registration.
+Keep the `qcom.Client` open for as long as the STK run is active. Closing it releases the CAT2 client and drops the claimed event registration.
 
 This is still a deliberate takeover of another CAT2 client. Releasing the owner can disrupt whatever process or daemon owns that CAT2 CID until it reallocates a client or the modem is reset.
 
@@ -470,32 +473,32 @@ This is still a deliberate takeover of another CAT2 client. Releasing the owner 
 Run all tests:
 
 ```sh
-GOCACHE=/tmp/uicc-go-build go test ./...
+GOCACHE=/tmp/wwan-go-build go test ./...
 ```
 
 Race-test the protocol packages:
 
 ```sh
-GOCACHE=/tmp/uicc-go-build go test -race ./at ./mbim ./qcom ./qcom/qmi ./qcom/qrtr ./qcom/uim
+GOCACHE=/tmp/wwan-go-build go test -race ./at ./mbim ./qcom ./qcom/qmi ./qcom/qrtr
 ```
 
 Cross-compile the AT package:
 
 ```sh
-GOOS=windows GOCACHE=/tmp/uicc-go-build go test -c -o /tmp/uicc-go-at-windows.test.exe ./at
-GOOS=darwin GOCACHE=/tmp/uicc-go-build go test -c -o /tmp/uicc-go-at-darwin.test ./at
+GOOS=windows GOCACHE=/tmp/wwan-go-build go test -c -o /tmp/wwan-go-at-windows.test.exe ./at
+GOOS=darwin GOCACHE=/tmp/wwan-go-build go test -c -o /tmp/wwan-go-at-darwin.test ./at
 ```
 
 Check module tidiness:
 
 ```sh
-GOCACHE=/tmp/uicc-go-build go mod tidy -diff
+GOCACHE=/tmp/wwan-go-build go mod tidy -diff
 ```
 
 ## Design Notes
 
-- Protocol readers expose transport and protocol primitives. They should not depend on `usim`.
-- `usim` provides card-level adaptation and business behavior on top of readers.
+- Protocol clients expose transport and protocol primitives. They should not depend on `sim`.
+- `sim` provides card-level adaptation and business behavior on top of readers.
 - QMI and MBIM require explicit proxy or direct mode selection.
 - QRTR is a top-level QCOM transport package.
 - Types implement Go standard interfaces such as `encoding.BinaryMarshaler`, `encoding.BinaryUnmarshaler`, `io.ReaderFrom`, and `io.WriterTo` where those interfaces naturally fit the wire format.

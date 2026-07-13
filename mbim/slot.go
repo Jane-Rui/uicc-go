@@ -12,29 +12,29 @@ const (
 	slotReadyTimeout = 5 * time.Second
 )
 
-func (r *Reader) ensureSlotActivated(ctx context.Context) error {
-	slot, err := r.currentActivatedSlot(ctx)
+func (c *Client) ensureSlotActivated(ctx context.Context) error {
+	slot, err := c.currentActivatedSlot(ctx)
 	if err != nil {
 		if errors.Is(err, StatusNoDeviceSupport) {
 			return nil
 		}
-		return fmt.Errorf("activating MBIM slot %d: %w", r.slot+1, err)
+		return fmt.Errorf("activating MBIM slot %d: %w", c.slot+1, err)
 	}
-	if slot == r.slot {
+	if slot == c.slot {
 		return nil
 	}
-	if err := r.activateSlot(ctx, r.slot); err != nil {
-		return fmt.Errorf("activating MBIM slot %d: %w", r.slot+1, err)
+	if err := c.activateSlot(ctx, c.slot); err != nil {
+		return fmt.Errorf("activating MBIM slot %d: %w", c.slot+1, err)
 	}
-	if err := r.waitForSlotReady(ctx); err != nil {
-		return fmt.Errorf("activating MBIM slot %d: %w", r.slot+1, err)
+	if err := c.waitForSlotReady(ctx); err != nil {
+		return fmt.Errorf("activating MBIM slot %d: %w", c.slot+1, err)
 	}
 	return nil
 }
 
-func (r *Reader) currentActivatedSlot(ctx context.Context) (uint32, error) {
-	request := DeviceSlotMappingsRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) currentActivatedSlot(ctx context.Context) (uint32, error) {
+	request := DeviceSlotMappingsRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return 0, err
 	}
 	if len(request.Response.SlotMappings) == 0 {
@@ -43,15 +43,15 @@ func (r *Reader) currentActivatedSlot(ctx context.Context) (uint32, error) {
 	return request.Response.SlotMappings[0].Slot, nil
 }
 
-func (r *Reader) activateSlot(ctx context.Context, slot uint32) error {
+func (c *Client) activateSlot(ctx context.Context, slot uint32) error {
 	request := DeviceSlotMappingsRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		SlotMappings:  []SlotMapping{{Slot: slot}},
 	}
-	return r.transmit(ctx, request.Request())
+	return c.transmit(ctx, request.Request())
 }
 
-func (r *Reader) waitForSlotReady(ctx context.Context) error {
+func (c *Client) waitForSlotReady(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, slotReadyTimeout)
 	defer cancel()
 
@@ -59,11 +59,11 @@ func (r *Reader) waitForSlotReady(ctx context.Context) error {
 	var sawReadyState bool
 	for {
 		request := SubscriberReadyStatusRequest{
-			TransactionID: r.nextTransactionID(),
-			MBIMExVersion: r.mbimExVersion,
-			SlotID:        r.subscriberReadySlotID(),
+			TransactionID: c.nextTransactionID(),
+			MBIMExVersion: c.mbimExVersion,
+			SlotID:        c.subscriberReadySlotID(),
 		}
-		err := r.transmit(ctx, request.Request())
+		err := c.transmit(ctx, request.Request())
 		if err == nil {
 			sawReadyState = true
 			lastReadyState = request.Response.ReadyState

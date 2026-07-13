@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/damonto/uicc-go/apdu"
+	"github.com/damonto/wwan-go/apdu"
 )
 
-func (r *Reader) ListApplications(ctx context.Context) ([]Application, error) {
-	request := ApplicationListRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) ListApplications(ctx context.Context) ([]Application, error) {
+	request := ApplicationListRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, fmt.Errorf("listing MBIM applications: %w", err)
 	}
 
@@ -29,7 +29,7 @@ func (r *Reader) ListApplications(ctx context.Context) ([]Application, error) {
 	return apps, nil
 }
 
-func (r *Reader) AuthenticateAKA(ctx context.Context, rand, autn []byte) (*AuthAKAResponse, error) {
+func (c *Client) AuthenticateAKA(ctx context.Context, rand, autn []byte) (*AuthAKAResponse, error) {
 	if len(rand) != 16 {
 		return nil, fmt.Errorf("authenticating MBIM AKA: RAND length %d, want 16", len(rand))
 	}
@@ -38,11 +38,11 @@ func (r *Reader) AuthenticateAKA(ctx context.Context, rand, autn []byte) (*AuthA
 	}
 
 	request := AuthAKARequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		Rand:          slices.Clone(rand),
 		AUTN:          slices.Clone(autn),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		if errors.Is(err, StatusAuthSyncFailure) {
 			return request.Response, fmt.Errorf("authenticating MBIM AKA: %w", err)
 		}
@@ -51,27 +51,27 @@ func (r *Reader) AuthenticateAKA(ctx context.Context, rand, autn []byte) (*AuthA
 	return request.Response, nil
 }
 
-func (r *Reader) QueryUiccATR(ctx context.Context) ([]byte, error) {
+func (c *Client) QueryUiccATR(ctx context.Context) ([]byte, error) {
 	request := UiccATRQueryRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, fmt.Errorf("querying MBIM UICC ATR: %w", err)
 	}
 	return slices.Clone(request.Response.ATR), nil
 }
 
-func (r *Reader) OpenChannel(ctx context.Context, aid []byte) (uint32, error) {
+func (c *Client) OpenChannel(ctx context.Context, aid []byte) (uint32, error) {
 	request := OpenChannelRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 		ApplicationID: slices.Clone(aid),
 		ChannelGroup:  uiccChannelGroupDefault,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return 0, fmt.Errorf("opening MBIM UICC channel: %w", err)
 	}
 	if err := uiccStatusError(request.Response.Status); err != nil {
@@ -80,82 +80,82 @@ func (r *Reader) OpenChannel(ctx context.Context, aid []byte) (uint32, error) {
 	return request.Response.Channel, nil
 }
 
-func (r *Reader) TransmitAPDU(ctx context.Context, channel uint32, command []byte) ([]byte, uint32, error) {
+func (c *Client) TransmitAPDU(ctx context.Context, channel uint32, command []byte) ([]byte, uint32, error) {
 	request := APDURequest{
-		TransactionID:   r.nextTransactionID(),
-		MBIMExVersion:   r.mbimExVersion,
-		SlotID:          r.slot,
+		TransactionID:   c.nextTransactionID(),
+		MBIMExVersion:   c.mbimExVersion,
+		SlotID:          c.slot,
 		Channel:         channel,
 		SecureMessaging: UiccSecureMessagingNone,
 		ClassByteType:   UiccClassByteTypeInterIndustry,
 		Command:         slices.Clone(command),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, 0, fmt.Errorf("transmitting MBIM UICC APDU: %w", err)
 	}
 	return slices.Clone(request.Response.Response), request.Response.Status, nil
 }
 
-func (r *Reader) SetUiccReset(ctx context.Context, action UiccPassThroughAction) (UiccPassThroughStatus, error) {
+func (c *Client) SetUiccReset(ctx context.Context, action UiccPassThroughAction) (UiccPassThroughStatus, error) {
 	request := UiccResetSetRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 		Action:        action,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return 0, fmt.Errorf("setting MBIM UICC reset: %w", err)
 	}
-	r.clearEnvelopeSupport()
+	c.clearEnvelopeSupport()
 	return request.Response.PassThroughStatus, nil
 }
 
-func (r *Reader) QueryUiccReset(ctx context.Context) (UiccPassThroughStatus, error) {
+func (c *Client) QueryUiccReset(ctx context.Context) (UiccPassThroughStatus, error) {
 	request := UiccResetQueryRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return 0, fmt.Errorf("querying MBIM UICC reset: %w", err)
 	}
 	return request.Response.PassThroughStatus, nil
 }
 
-func (r *Reader) SetUiccTerminalCapability(ctx context.Context, capabilities [][]byte) error {
+func (c *Client) SetUiccTerminalCapability(ctx context.Context, capabilities [][]byte) error {
 	request := UiccTerminalCapabilitySetRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 		Capabilities:  cloneByteSlices(capabilities),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return fmt.Errorf("setting MBIM UICC terminal capability: %w", err)
 	}
 	return nil
 }
 
-func (r *Reader) QueryUiccTerminalCapability(ctx context.Context) ([][]byte, error) {
+func (c *Client) QueryUiccTerminalCapability(ctx context.Context) ([][]byte, error) {
 	request := UiccTerminalCapabilityQueryRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return nil, fmt.Errorf("querying MBIM UICC terminal capability: %w", err)
 	}
 	return cloneByteSlices(request.Response.Capabilities), nil
 }
 
-func (r *Reader) CloseChannel(ctx context.Context, channel uint32) error {
+func (c *Client) CloseChannel(ctx context.Context, channel uint32) error {
 	request := CloseChannelRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.slot,
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.slot,
 		Channel:       channel,
 		ChannelGroup:  uiccChannelGroupDefault,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return fmt.Errorf("closing MBIM UICC channel: %w", err)
 	}
 	if err := uiccStatusError(request.Response.Status); err != nil {
@@ -164,31 +164,31 @@ func (r *Reader) CloseChannel(ctx context.Context, channel uint32) error {
 	return nil
 }
 
-func (r *Reader) QuerySTKPAC(ctx context.Context) (STKPACInfo, error) {
-	request := STKPACQueryRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) QuerySTKPAC(ctx context.Context) (STKPACInfo, error) {
+	request := STKPACQueryRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return STKPACInfo{}, fmt.Errorf("querying MBIM STK PAC: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) SetSTKPAC(ctx context.Context, pacHostControl []byte) (STKPACInfo, error) {
+func (c *Client) SetSTKPAC(ctx context.Context, pacHostControl []byte) (STKPACInfo, error) {
 	if len(pacHostControl) != stkPACHostControlLength {
 		return STKPACInfo{}, fmt.Errorf("setting MBIM STK PAC: host control length %d, want %d", len(pacHostControl), stkPACHostControlLength)
 	}
 
 	request := STKPACSetRequest{
-		TransactionID:  r.nextTransactionID(),
+		TransactionID:  c.nextTransactionID(),
 		PacHostControl: slices.Clone(pacHostControl),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return STKPACInfo{}, fmt.Errorf("setting MBIM STK PAC: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) ReadSTKPAC(ctx context.Context) (STKPAC, error) {
-	indication, err := r.nextIndication(ctx, indicationKey{serviceID: ServiceSTK, commandID: CIDSTKPAC})
+func (c *Client) ReadSTKPAC(ctx context.Context) (STKPAC, error) {
+	indication, err := c.nextIndication(ctx, indicationKey{serviceID: ServiceSTK, commandID: CIDSTKPAC})
 	if err != nil {
 		return STKPAC{}, fmt.Errorf("reading MBIM STK PAC: %w", err)
 	}
@@ -200,8 +200,8 @@ func (r *Reader) ReadSTKPAC(ctx context.Context) (STKPAC, error) {
 }
 
 // WatchSTKPAC streams STK proactive command notifications until ctx is done.
-func (r *Reader) WatchSTKPAC(ctx context.Context) (<-chan STKPAC, error) {
-	indications, unsubscribe, err := r.subscribeIndication(indicationKey{serviceID: ServiceSTK, commandID: CIDSTKPAC})
+func (c *Client) WatchSTKPAC(ctx context.Context) (<-chan STKPAC, error) {
+	indications, unsubscribe, err := c.subscribeIndication(indicationKey{serviceID: ServiceSTK, commandID: CIDSTKPAC})
 	if err != nil {
 		return nil, fmt.Errorf("watching MBIM STK PAC: %w", err)
 	}
@@ -234,36 +234,36 @@ func (r *Reader) WatchSTKPAC(ctx context.Context) (<-chan STKPAC, error) {
 	return out, nil
 }
 
-func (r *Reader) STKTerminalResponse(ctx context.Context, data []byte) (STKTerminalResponseInfo, error) {
+func (c *Client) STKTerminalResponse(ctx context.Context, data []byte) (STKTerminalResponseInfo, error) {
 	if len(data) == 0 {
 		return STKTerminalResponseInfo{}, errors.New("sending MBIM STK terminal response: response is empty")
 	}
 
 	request := STKTerminalResponseRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		Data:          slices.Clone(data),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return STKTerminalResponseInfo{}, fmt.Errorf("sending MBIM STK terminal response: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) QuerySTKEnvelopeSupport(ctx context.Context) (STKEnvelopeInfo, error) {
-	info, err := r.querySTKEnvelopeSupport(ctx)
+func (c *Client) QuerySTKEnvelopeSupport(ctx context.Context) (STKEnvelopeInfo, error) {
+	info, err := c.querySTKEnvelopeSupport(ctx)
 	if err != nil {
 		return STKEnvelopeInfo{}, err
 	}
-	r.setEnvelopeSupport(info)
+	c.setEnvelopeSupport(info)
 	return info, nil
 }
 
-func (r *Reader) STKEnvelope(ctx context.Context, data []byte) error {
+func (c *Client) STKEnvelope(ctx context.Context, data []byte) error {
 	if len(data) == 0 {
 		return errors.New("running MBIM STK envelope: envelope is empty")
 	}
 
-	info, err := r.envelopeSupportInfo(ctx)
+	info, err := c.envelopeSupportInfo(ctx)
 	if err != nil {
 		return fmt.Errorf("running MBIM STK envelope: %w", err)
 	}
@@ -272,51 +272,51 @@ func (r *Reader) STKEnvelope(ctx context.Context, data []byte) error {
 	}
 
 	request := STKEnvelopeRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		Data:          slices.Clone(data),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return fmt.Errorf("running MBIM STK envelope: %w", err)
 	}
 	return nil
 }
 
-func (r *Reader) querySTKEnvelopeSupport(ctx context.Context) (STKEnvelopeInfo, error) {
-	request := STKEnvelopeQueryRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) querySTKEnvelopeSupport(ctx context.Context) (STKEnvelopeInfo, error) {
+	request := STKEnvelopeQueryRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return STKEnvelopeInfo{}, fmt.Errorf("querying MBIM STK envelope support: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) envelopeSupportInfo(ctx context.Context) (STKEnvelopeInfo, error) {
-	r.mu.Lock()
-	if r.envelopeSupport != nil {
-		info := *r.envelopeSupport
-		r.mu.Unlock()
+func (c *Client) envelopeSupportInfo(ctx context.Context) (STKEnvelopeInfo, error) {
+	c.mu.Lock()
+	if c.envelopeSupport != nil {
+		info := *c.envelopeSupport
+		c.mu.Unlock()
 		return info, nil
 	}
-	r.mu.Unlock()
+	c.mu.Unlock()
 
-	info, err := r.querySTKEnvelopeSupport(ctx)
+	info, err := c.querySTKEnvelopeSupport(ctx)
 	if err != nil {
 		return STKEnvelopeInfo{}, err
 	}
-	r.setEnvelopeSupport(info)
+	c.setEnvelopeSupport(info)
 	return info, nil
 }
 
-func (r *Reader) setEnvelopeSupport(info STKEnvelopeInfo) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.envelopeSupport = new(STKEnvelopeInfo)
-	*r.envelopeSupport = info
+func (c *Client) setEnvelopeSupport(info STKEnvelopeInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.envelopeSupport = new(STKEnvelopeInfo)
+	*c.envelopeSupport = info
 }
 
-func (r *Reader) clearEnvelopeSupport() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.envelopeSupport = nil
+func (c *Client) clearEnvelopeSupport() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.envelopeSupport = nil
 }
 
 func cloneByteSlices(values [][]byte) [][]byte {

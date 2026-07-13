@@ -64,20 +64,20 @@ func (r *PacketServiceInfo) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (r *Reader) PacketService(ctx context.Context) (PacketServiceInfo, error) {
-	request := PacketServiceRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) PacketService(ctx context.Context) (PacketServiceInfo, error) {
+	request := PacketServiceRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return PacketServiceInfo{}, fmt.Errorf("reading MBIM packet service: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) SetPacketService(ctx context.Context, action PacketServiceAction) (PacketServiceInfo, error) {
+func (c *Client) SetPacketService(ctx context.Context, action PacketServiceAction) (PacketServiceInfo, error) {
 	request := PacketServiceSetRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		Action:        action,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return PacketServiceInfo{}, fmt.Errorf("setting MBIM packet service: %w", err)
 	}
 	return *request.Response, nil

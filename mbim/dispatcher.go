@@ -11,7 +11,7 @@ import (
 const maxQueuedIndications = 32
 
 var (
-	errReaderClosed    = errors.New("MBIM reader is closed")
+	errClientClosed    = errors.New("MBIM client is closed")
 	errReceiverStopped = errors.New("MBIM receiver stopped")
 )
 
@@ -33,80 +33,80 @@ type indicationKey struct {
 	commandID uint32
 }
 
-func (r *Reader) startReceiver() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ensureReceiverLocked(false)
+func (c *Client) startReceiver() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ensureReceiverLocked(false)
 }
 
-func (r *Reader) ensureReceiverLocked(allowClosing bool) error {
+func (c *Client) ensureReceiverLocked(allowClosing bool) error {
 	switch {
-	case r.closed:
-		return errReaderClosed
-	case r.closing && !allowClosing:
-		return errReaderClosed
-	case r.receiverErr != nil:
-		return r.receiverErr
-	case r.receiverStarted:
+	case c.closed:
+		return errClientClosed
+	case c.closing && !allowClosing:
+		return errClientClosed
+	case c.receiverErr != nil:
+		return c.receiverErr
+	case c.receiverStarted:
 		return nil
-	case r.conn == nil:
-		return errors.New("MBIM reader connection is nil")
+	case c.conn == nil:
+		return errors.New("MBIM client connection is nil")
 	}
 
-	if r.pending == nil {
-		r.pending = make(map[uint32]*responseWaiter)
+	if c.pending == nil {
+		c.pending = make(map[uint32]*responseWaiter)
 	}
-	if r.subs == nil {
-		r.subs = make(map[indicationKey]map[chan Indication]struct{})
+	if c.subs == nil {
+		c.subs = make(map[indicationKey]map[chan Indication]struct{})
 	}
-	if r.waiters == nil {
-		r.waiters = make(map[indicationKey][]chan Indication)
+	if c.waiters == nil {
+		c.waiters = make(map[indicationKey][]chan Indication)
 	}
-	if r.indications == nil {
-		r.indications = make(map[indicationKey][]Indication)
+	if c.indications == nil {
+		c.indications = make(map[indicationKey][]Indication)
 	}
-	r.receiverStarted = true
-	go r.receive()
+	c.receiverStarted = true
+	go c.receive()
 	return nil
 }
 
-func (r *Reader) beginClose() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || r.closing {
+func (c *Client) beginClose() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.closing {
 		return false
 	}
-	r.closing = true
+	c.closing = true
 	return true
 }
 
-func (r *Reader) finishClose() {
-	r.mu.Lock()
-	r.closed = true
-	r.mu.Unlock()
+func (c *Client) finishClose() {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
 }
 
-func (r *Reader) transmit(ctx context.Context, request *Request) error {
-	return r.transmitRequest(ctx, request, false)
+func (c *Client) transmit(ctx context.Context, request *Request) error {
+	return c.transmitRequest(ctx, request, false)
 }
 
-func (r *Reader) transmitClosing(ctx context.Context, request *Request) error {
-	return r.transmitRequest(ctx, request, true)
+func (c *Client) transmitClosing(ctx context.Context, request *Request) error {
+	return c.transmitRequest(ctx, request, true)
 }
 
-func (r *Reader) transmitRequest(ctx context.Context, request *Request, allowClosing bool) error {
+func (c *Client) transmitRequest(ctx context.Context, request *Request, allowClosing bool) error {
 	ctx, cancel := requestContext(ctx, request.timeout())
 	defer cancel()
 
-	results, unregister, err := r.registerResponse(request, allowClosing)
+	results, unregister, err := c.registerResponse(request, allowClosing)
 	if err != nil {
 		return err
 	}
 	defer unregister()
 
-	r.writeMu.Lock()
-	_, err = request.writeConn(ctx, r.conn)
-	r.writeMu.Unlock()
+	c.writeMu.Lock()
+	_, err = request.writeConn(ctx, c.conn)
+	c.writeMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -127,51 +127,51 @@ func requestContext(ctx context.Context, timeout time.Duration) (context.Context
 	return context.WithDeadline(ctx, deadline)
 }
 
-func (r *Reader) registerResponse(request *Request, allowClosing bool) (<-chan responseResult, func(), error) {
+func (c *Client) registerResponse(request *Request, allowClosing bool) (<-chan responseResult, func(), error) {
 	messageType, ok := responseMessageType(request.MessageType)
 	if !ok {
 		return nil, nil, fmt.Errorf("registering MBIM response: unsupported request message type %#x", request.MessageType)
 	}
 	serviceID, commandID, expectCommand := request.expectedCommand()
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.ensureReceiverLocked(allowClosing); err != nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ensureReceiverLocked(allowClosing); err != nil {
 		return nil, nil, err
 	}
-	if _, ok := r.pending[request.TransactionID]; ok {
+	if _, ok := c.pending[request.TransactionID]; ok {
 		return nil, nil, fmt.Errorf("registering MBIM response: transaction ID %d is already pending", request.TransactionID)
 	}
 
 	ch := make(chan responseResult, 1)
-	r.pending[request.TransactionID] = &responseWaiter{
+	c.pending[request.TransactionID] = &responseWaiter{
 		messageType:   messageType,
 		serviceID:     serviceID,
 		commandID:     commandID,
 		expectCommand: expectCommand,
 		ch:            ch,
 	}
-	return ch, func() { r.unregisterResponse(request.TransactionID, ch) }, nil
+	return ch, func() { c.unregisterResponse(request.TransactionID, ch) }, nil
 }
 
-func (r *Reader) unregisterResponse(transactionID uint32, ch <-chan responseResult) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	waiter, ok := r.pending[transactionID]
+func (c *Client) unregisterResponse(transactionID uint32, ch <-chan responseResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	waiter, ok := c.pending[transactionID]
 	if ok && waiter.ch == ch {
-		delete(r.pending, transactionID)
+		delete(c.pending, transactionID)
 	}
 }
 
-func (r *Reader) receive() {
+func (c *Client) receive() {
 	var collector *fragmentCollector
 	for {
-		buf, err := readFrame(r.conn)
+		buf, err := readFrame(c.conn)
 		if err != nil {
 			if timeoutError(err) {
 				continue
 			}
-			r.stopReceiver(fmt.Errorf("receiving MBIM message: %w", err))
+			c.stopReceiver(fmt.Errorf("receiving MBIM message: %w", err))
 			return
 		}
 
@@ -179,7 +179,7 @@ func (r *Reader) receive() {
 		if isFragmentMessage(messageType) {
 			complete, err := collectFrame(&collector, buf)
 			if err != nil {
-				r.stopReceiver(err)
+				c.stopReceiver(err)
 				return
 			}
 			if complete == nil {
@@ -191,14 +191,14 @@ func (r *Reader) receive() {
 
 		switch messageType {
 		case MessageTypeOpenDone, MessageTypeCloseDone, MessageTypeCommandDone, MessageTypeFunctionError:
-			r.deliverResponse(messageType, buf)
+			c.deliverResponse(messageType, buf)
 		case MessageTypeIndicateStatus:
 			var indication Indication
 			if err := indication.UnmarshalBinary(buf); err != nil {
-				r.stopReceiver(err)
+				c.stopReceiver(err)
 				return
 			}
-			r.publishIndication(indication)
+			c.publishIndication(indication)
 		}
 	}
 }
@@ -230,17 +230,17 @@ func collectFrame(collector **fragmentCollector, buf []byte) ([]byte, error) {
 	return nil, nil
 }
 
-func (r *Reader) deliverResponse(messageType MessageType, data []byte) {
+func (c *Client) deliverResponse(messageType MessageType, data []byte) {
 	transactionID := binary.LittleEndian.Uint32(data[8:12])
 
-	r.mu.Lock()
-	waiter := r.pending[transactionID]
+	c.mu.Lock()
+	waiter := c.pending[transactionID]
 	if waiter == nil || !waiter.matches(messageType, data) {
-		r.mu.Unlock()
+		c.mu.Unlock()
 		return
 	}
-	delete(r.pending, transactionID)
-	r.mu.Unlock()
+	delete(c.pending, transactionID)
+	c.mu.Unlock()
 
 	waiter.ch <- responseResult{data: data}
 }
@@ -260,19 +260,19 @@ func (w *responseWaiter) matches(messageType MessageType, data []byte) bool {
 	return header.ServiceID == w.serviceID && header.CommandID == w.commandID
 }
 
-func (r *Reader) stopReceiver(err error) {
-	r.mu.Lock()
-	if r.receiverErr == nil {
-		r.receiverErr = err
+func (c *Client) stopReceiver(err error) {
+	c.mu.Lock()
+	if c.receiverErr == nil {
+		c.receiverErr = err
 	}
-	pending := r.pending
-	r.pending = make(map[uint32]*responseWaiter)
-	subs := r.subs
-	r.subs = make(map[indicationKey]map[chan Indication]struct{})
-	waiters := r.waiters
-	r.waiters = make(map[indicationKey][]chan Indication)
-	r.receiverStarted = false
-	r.mu.Unlock()
+	pending := c.pending
+	c.pending = make(map[uint32]*responseWaiter)
+	subs := c.subs
+	c.subs = make(map[indicationKey]map[chan Indication]struct{})
+	waiters := c.waiters
+	c.waiters = make(map[indicationKey][]chan Indication)
+	c.receiverStarted = false
+	c.mu.Unlock()
 
 	for _, waiter := range pending {
 		waiter.ch <- responseResult{err: err}
@@ -289,41 +289,41 @@ func (r *Reader) stopReceiver(err error) {
 	}
 }
 
-func (r *Reader) nextIndication(ctx context.Context, key indicationKey) (Indication, error) {
-	r.mu.Lock()
-	if r.closed || r.closing {
-		r.mu.Unlock()
-		return Indication{}, errReaderClosed
+func (c *Client) nextIndication(ctx context.Context, key indicationKey) (Indication, error) {
+	c.mu.Lock()
+	if c.closed || c.closing {
+		c.mu.Unlock()
+		return Indication{}, errClientClosed
 	}
 
-	queue := r.indications[key]
+	queue := c.indications[key]
 	if len(queue) > 0 {
 		indication := cloneIndication(queue[0])
 		if len(queue) == 1 {
-			delete(r.indications, key)
+			delete(c.indications, key)
 		} else {
-			r.indications[key] = queue[1:]
+			c.indications[key] = queue[1:]
 		}
-		r.mu.Unlock()
+		c.mu.Unlock()
 		return indication, nil
 	}
-	if r.receiverErr != nil {
-		err := r.receiverErr
-		r.mu.Unlock()
+	if c.receiverErr != nil {
+		err := c.receiverErr
+		c.mu.Unlock()
 		return Indication{}, err
 	}
-	if err := r.ensureReceiverLocked(false); err != nil {
-		r.mu.Unlock()
+	if err := c.ensureReceiverLocked(false); err != nil {
+		c.mu.Unlock()
 		return Indication{}, err
 	}
 
 	ch := make(chan Indication, 1)
-	r.waiters[key] = append(r.waiters[key], ch)
-	r.mu.Unlock()
+	c.waiters[key] = append(c.waiters[key], ch)
+	c.mu.Unlock()
 
 	select {
 	case <-ctx.Done():
-		if indication, ok := r.cancelIndicationWaiter(key, ch); ok {
+		if indication, ok := c.cancelIndicationWaiter(key, ch); ok {
 			return indication, nil
 		}
 		return Indication{}, ctx.Err()
@@ -335,73 +335,73 @@ func (r *Reader) nextIndication(ctx context.Context, key indicationKey) (Indicat
 	}
 }
 
-func (r *Reader) subscribeIndication(key indicationKey) (<-chan Indication, func(), error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || r.closing {
-		return nil, nil, errReaderClosed
+func (c *Client) subscribeIndication(key indicationKey) (<-chan Indication, func(), error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.closing {
+		return nil, nil, errClientClosed
 	}
 
-	queued := r.indications[key]
-	if r.receiverErr != nil {
+	queued := c.indications[key]
+	if c.receiverErr != nil {
 		if len(queued) == 0 {
-			return nil, nil, r.receiverErr
+			return nil, nil, c.receiverErr
 		}
 		ch := make(chan Indication, len(queued))
 		for _, indication := range queued {
 			ch <- cloneIndication(indication)
 		}
 		close(ch)
-		delete(r.indications, key)
+		delete(c.indications, key)
 		return ch, func() {}, nil
 	}
 
-	if err := r.ensureReceiverLocked(false); err != nil {
+	if err := c.ensureReceiverLocked(false); err != nil {
 		return nil, nil, err
 	}
 
 	ch := make(chan Indication, maxQueuedIndications)
-	if r.subs[key] == nil {
-		r.subs[key] = make(map[chan Indication]struct{})
+	if c.subs[key] == nil {
+		c.subs[key] = make(map[chan Indication]struct{})
 	}
-	r.subs[key][ch] = struct{}{}
+	c.subs[key][ch] = struct{}{}
 	for _, indication := range queued {
 		ch <- cloneIndication(indication)
 	}
-	delete(r.indications, key)
-	return ch, func() { r.unsubscribeIndication(key, ch) }, nil
+	delete(c.indications, key)
+	return ch, func() { c.unsubscribeIndication(key, ch) }, nil
 }
 
-func (r *Reader) unsubscribeIndication(key indicationKey, ch chan Indication) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	subs := r.subs[key]
+func (c *Client) unsubscribeIndication(key indicationKey, ch chan Indication) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	subs := c.subs[key]
 	if subs == nil {
 		return
 	}
 	delete(subs, ch)
 	if len(subs) == 0 {
-		delete(r.subs, key)
+		delete(c.subs, key)
 	}
 }
 
-func (r *Reader) cancelIndicationWaiter(key indicationKey, ch chan Indication) (Indication, bool) {
-	r.mu.Lock()
-	waiters := r.waiters[key]
+func (c *Client) cancelIndicationWaiter(key indicationKey, ch chan Indication) (Indication, bool) {
+	c.mu.Lock()
+	waiters := c.waiters[key]
 	for i, waiter := range waiters {
 		if waiter != ch {
 			continue
 		}
 		waiters = append(waiters[:i], waiters[i+1:]...)
 		if len(waiters) == 0 {
-			delete(r.waiters, key)
+			delete(c.waiters, key)
 		} else {
-			r.waiters[key] = waiters
+			c.waiters[key] = waiters
 		}
-		r.mu.Unlock()
+		c.mu.Unlock()
 		return Indication{}, false
 	}
-	r.mu.Unlock()
+	c.mu.Unlock()
 
 	select {
 	case indication, ok := <-ch:
@@ -413,24 +413,24 @@ func (r *Reader) cancelIndicationWaiter(key indicationKey, ch chan Indication) (
 	return Indication{}, false
 }
 
-func (r *Reader) publishIndication(indication Indication) {
+func (c *Client) publishIndication(indication Indication) {
 	key := indicationKey{serviceID: indication.ServiceID, commandID: indication.CommandID}
 
-	r.mu.Lock()
-	subs := r.subs[key]
-	waiters := r.waiters[key]
+	c.mu.Lock()
+	subs := c.subs[key]
+	waiters := c.waiters[key]
 	var waiter chan Indication
 	if len(waiters) > 0 {
 		waiter = waiters[0]
 		if len(waiters) == 1 {
-			delete(r.waiters, key)
+			delete(c.waiters, key)
 		} else {
-			r.waiters[key] = waiters[1:]
+			c.waiters[key] = waiters[1:]
 		}
 	}
 	if len(subs) == 0 && waiter == nil {
-		r.queueIndicationLocked(key, indication)
-		r.mu.Unlock()
+		c.queueIndicationLocked(key, indication)
+		c.mu.Unlock()
 		return
 	}
 	for ch := range subs {
@@ -439,15 +439,15 @@ func (r *Reader) publishIndication(indication Indication) {
 	if waiter != nil {
 		waiter <- cloneIndication(indication)
 	}
-	r.mu.Unlock()
+	c.mu.Unlock()
 }
 
-func (r *Reader) queueIndicationLocked(key indicationKey, indication Indication) {
-	queue := append(r.indications[key], cloneIndication(indication))
+func (c *Client) queueIndicationLocked(key indicationKey, indication Indication) {
+	queue := append(c.indications[key], cloneIndication(indication))
 	if len(queue) > maxQueuedIndications {
 		queue = queue[len(queue)-maxQueuedIndications:]
 	}
-	r.indications[key] = queue
+	c.indications[key] = queue
 }
 
 func deliverIndication(ch chan Indication, indication Indication) {

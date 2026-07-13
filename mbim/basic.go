@@ -6,32 +6,32 @@ import (
 	"slices"
 )
 
-func (r *Reader) RadioState(ctx context.Context) (RadioStateInfo, error) {
-	request := RadioStateRequest{TransactionID: r.nextTransactionID()}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+func (c *Client) RadioState(ctx context.Context) (RadioStateInfo, error) {
+	request := RadioStateRequest{TransactionID: c.nextTransactionID()}
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return RadioStateInfo{}, fmt.Errorf("reading MBIM radio state: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) SetRadioState(ctx context.Context, state RadioSwitchState) (RadioStateInfo, error) {
+func (c *Client) SetRadioState(ctx context.Context, state RadioSwitchState) (RadioStateInfo, error) {
 	request := RadioStateSetRequest{
-		TransactionID: r.nextTransactionID(),
+		TransactionID: c.nextTransactionID(),
 		State:         state,
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return RadioStateInfo{}, fmt.Errorf("setting MBIM radio state: %w", err)
 	}
 	return *request.Response, nil
 }
 
-func (r *Reader) SubscriberReadyStatus(ctx context.Context) (SubscriberReadyStatusResponse, error) {
+func (c *Client) SubscriberReadyStatus(ctx context.Context) (SubscriberReadyStatusResponse, error) {
 	request := SubscriberReadyStatusRequest{
-		TransactionID: r.nextTransactionID(),
-		MBIMExVersion: r.mbimExVersion,
-		SlotID:        r.subscriberReadySlotID(),
+		TransactionID: c.nextTransactionID(),
+		MBIMExVersion: c.mbimExVersion,
+		SlotID:        c.subscriberReadySlotID(),
 	}
-	if err := r.transmit(ctx, request.Request()); err != nil {
+	if err := c.transmit(ctx, request.Request()); err != nil {
 		return SubscriberReadyStatusResponse{}, fmt.Errorf("reading MBIM subscriber ready status: %w", err)
 	}
 	resp := *request.Response

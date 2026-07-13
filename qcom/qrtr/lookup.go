@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/damonto/uicc-go/qcom"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 func (c *Conn) findService(serviceType qcom.ServiceType) (*service, error) {

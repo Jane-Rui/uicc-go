@@ -12,7 +12,7 @@ type DirectDialer struct {
 }
 
 func (d ProxyDialer) Dial(context.Context) (Conn, error) {
-	return nil, errors.New("opening MBIM reader: mbim-proxy is only supported on linux")
+	return nil, errors.New("opening MBIM client: mbim-proxy is only supported on linux")
 }
 
 func (d DirectDialer) Dial(context.Context) (Conn, error) {

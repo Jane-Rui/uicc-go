@@ -337,6 +337,8 @@ type WDSProfileSettings struct {
 	NameKnown bool
 	APN       string
 	APNKnown  bool
+	PDPType   WDSPDPType
+	PDPKnown  bool
 
 	PCSCFUsingPCO       bool
 	PCSCFUsingPCOKnown  bool

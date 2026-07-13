@@ -251,6 +251,12 @@ func (r *WDSGetProfileSettingsResponse) UnmarshalTLVs(tlvs tlv.TLVs) error {
 	if value, ok := tlv.Value(tlvs, wdsTLVProfileAPN); ok {
 		r.Settings.APN, r.Settings.APNKnown = string(value), true
 	}
+	if value, ok := tlv.Value(tlvs, wdsTLVProfilePDPType); ok {
+		if len(value) < 1 {
+			return errors.New("parsing QMI WDS profile settings: PDP type is truncated")
+		}
+		r.Settings.PDPType, r.Settings.PDPKnown = WDSPDPType(value[0]), true
+	}
 	readBool := func(kind byte, known *bool, target *bool) error {
 		value, ok := tlv.Value(tlvs, kind)
 		if !ok {

@@ -164,7 +164,8 @@ func TestWDSGetProfileSettingsResponseUnmarshalTLVs(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "empty"},
-		{name: "IMS", tlvs: tlv.TLVs{tlv.Bytes(wdsTLVProfileAPN, []byte("ims")), tlv.Bytes(wdsTLVPCSCFUsingPCO, []byte{1}), tlv.Bytes(wdsTLVIMCNFlag, []byte{1})}},
+		{name: "IMS", tlvs: tlv.TLVs{tlv.Bytes(wdsTLVProfileAPN, []byte("ims")), tlv.Uint(wdsTLVProfilePDPType, uint8(WDSPDPTypeIPv6)), tlv.Bytes(wdsTLVPCSCFUsingPCO, []byte{1}), tlv.Bytes(wdsTLVIMCNFlag, []byte{1})}},
+		{name: "truncated PDP type", tlvs: tlv.TLVs{tlv.Bytes(wdsTLVProfilePDPType, nil)}, wantErr: true},
 		{name: "truncated bool", tlvs: tlv.TLVs{tlv.Bytes(wdsTLVPCSCFUsingPCO, nil)}, wantErr: true},
 	}
 	for _, tt := range tests {
@@ -180,7 +181,7 @@ func TestWDSGetProfileSettingsResponseUnmarshalTLVs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("UnmarshalTLVs() error = %v", err)
 			}
-			if tt.name == "IMS" && (!got.Settings.APNKnown || got.Settings.APN != "ims" || !got.Settings.PCSCFUsingPCO || !got.Settings.IMCN) {
+			if tt.name == "IMS" && (!got.Settings.APNKnown || got.Settings.APN != "ims" || !got.Settings.PDPKnown || got.Settings.PDPType != WDSPDPTypeIPv6 || !got.Settings.PCSCFUsingPCO || !got.Settings.IMCN) {
 				t.Fatalf("Settings = %+v", got.Settings)
 			}
 		})

@@ -47,10 +47,12 @@ const (
 	MessageWDSStartNetworkInterface MessageID = 0x0020
 	MessageWDSStopNetworkInterface  MessageID = 0x0021
 	MessageWDSCreateProfile         MessageID = 0x0027
+	MessageWDSModifyProfile         MessageID = 0x0028
 	MessageWDSDeleteProfile         MessageID = 0x0029
 	MessageWDSGetProfileList        MessageID = 0x002A
 	MessageWDSGetProfileSettings    MessageID = 0x002B
 	MessageWDSGetRuntimeSettings    MessageID = 0x002D
+	MessageWDSSetDefaultProfile     MessageID = 0x004A
 	MessageWDSSetClientIPFamily     MessageID = 0x004D
 	MessageWDSLegacyBindMuxDataPort MessageID = 0x0089
 	MessageWDSBindMuxDataPort       MessageID = 0x00A2
@@ -305,6 +307,14 @@ const (
 	WDSProfileType3GPP WDSProfileType = iota
 	WDSProfileType3GPP2
 	WDSProfileTypeEPC
+)
+
+// WDSProfileFamily identifies the profile family used by WDS default-profile operations.
+type WDSProfileFamily uint8
+
+const (
+	WDSProfileFamilyEmbedded WDSProfileFamily = iota
+	WDSProfileFamilyTethered
 )
 
 // WDSPDPType identifies the packet data protocol stored in a 3GPP profile.

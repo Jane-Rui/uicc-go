@@ -15,6 +15,8 @@ func TestWDSProfileRequests(t *testing.T) {
 	}{
 		{name: "list", req: WDSGetProfileListRequest{ClientID: 3, ProfileType: WDSProfileType3GPP}.Request(), want: MessageWDSGetProfileList},
 		{name: "settings", req: WDSGetProfileSettingsRequest{ClientID: 4, Profile: WDSProfileID{Type: WDSProfileType3GPP, Index: 2}}.Request(), want: MessageWDSGetProfileSettings},
+		{name: "modify", req: WDSModifyProfileRequest{ClientID: 5, Profile: WDSProfileID{Type: WDSProfileType3GPP, Index: 2}, PCSCFUsingPCO: true}.Request(), want: MessageWDSModifyProfile},
+		{name: "set default", req: WDSSetDefaultProfileRequest{ClientID: 6, Profile: WDSProfileID{Type: WDSProfileType3GPP, Index: 2}, Family: WDSProfileFamilyTethered}.Request(), want: MessageWDSSetDefaultProfile},
 		{name: "create", req: WDSCreateProfileRequest{ClientID: 5, APN: "ims", PDPType: WDSPDPTypeIPv4v6}.Request(), want: MessageWDSCreateProfile},
 		{name: "delete", req: WDSDeleteProfileRequest{ClientID: 6, Profile: WDSProfileID{Type: WDSProfileType3GPP, Index: 3}}.Request(), want: MessageWDSDeleteProfile},
 	}
@@ -22,6 +24,97 @@ func TestWDSProfileRequests(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.req.Service != ServiceWDS || tt.req.MessageID != tt.want {
 				t.Fatalf("request = service 0x%02X message 0x%04X", tt.req.Service, tt.req.MessageID)
+			}
+		})
+	}
+}
+
+func TestWDSProfileMutationRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+		want map[byte][]byte
+	}{
+		{
+			name: "enable P-CSCF via PCO",
+			req: WDSModifyProfileRequest{
+				Profile:       WDSProfileID{Type: WDSProfileType3GPP, Index: 7},
+				PCSCFUsingPCO: true,
+			}.Request(),
+			want: map[byte][]byte{
+				wdsTLVProfileID:     {byte(WDSProfileType3GPP), 7},
+				wdsTLVPCSCFUsingPCO: {1},
+			},
+		},
+		{
+			name: "set tethered default profile",
+			req: WDSSetDefaultProfileRequest{
+				Profile: WDSProfileID{Type: WDSProfileType3GPP, Index: 7},
+				Family:  WDSProfileFamilyTethered,
+			}.Request(),
+			want: map[byte][]byte{
+				wdsTLVProfileID: {byte(WDSProfileType3GPP), byte(WDSProfileFamilyTethered), 7},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for kind, want := range tt.want {
+				assertTLV(t, tt.req.TLVs, kind, want)
+			}
+		})
+	}
+}
+
+func TestClientWDSProfileMutations(t *testing.T) {
+	profile := WDSProfileID{Type: WDSProfileType3GPP, Index: 7}
+	tests := []struct {
+		name    string
+		message MessageID
+		apply   func(context.Context, *Client) error
+		resp    Response
+		wantErr bool
+	}{
+		{
+			name:    "modify profile",
+			message: MessageWDSModifyProfile,
+			apply:   func(ctx context.Context, client *Client) error { return client.WDSModifyProfile(ctx, profile, true) },
+			resp:    successResponse(MessageWDSModifyProfile),
+		},
+		{
+			name:    "default profile error",
+			message: MessageWDSSetDefaultProfile,
+			apply: func(ctx context.Context, client *Client) error {
+				return client.WDSSetDefaultProfile(ctx, profile, WDSProfileFamilyTethered)
+			},
+			resp:    errorResponse(MessageWDSSetDefaultProfile, QMIErrorNotSupported),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{t: t, calls: []transportCall{
+				{resp: allocatedClientResponse(ServiceWDS, 5)},
+				{
+					check: func(req Request) {
+						if req.ClientID != 5 || req.MessageID != tt.message {
+							t.Fatalf("mutation request = client %d message 0x%04X", req.ClientID, req.MessageID)
+						}
+					},
+					resp: tt.resp,
+				},
+				{resp: successResponse(MessageReleaseClientID)},
+			}}
+			client := &Client{transport: transport, slot: 1}
+
+			err := tt.apply(context.Background(), client)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("apply() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err := client.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
 			}
 		})
 	}

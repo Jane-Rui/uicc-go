@@ -171,7 +171,9 @@ func (c *Client) openPDN(ctx context.Context, cfg pdnOpenConfig) (*PDNSession, e
 		return nil, fmt.Errorf("allocate WDS client: %w", err)
 	}
 	session.wdsClientID = wdsClientID
-	if cfg.IPPreference == WDSIPPreferenceIPv4 || cfg.IPPreference == WDSIPPreferenceIPv6 {
+	// Legacy BAM-DMUX firmware selects the family from the stored IMS profile.
+	// Do not override that profile through either WDS family mechanism.
+	if cfg.LegacyMuxDataPort == 0 && (cfg.IPPreference == WDSIPPreferenceIPv4 || cfg.IPPreference == WDSIPPreferenceIPv6) {
 		if err := session.setClientIPFamily(ctx, WDSIPFamily(cfg.IPPreference)); err != nil {
 			return nil, errors.Join(err, session.Close())
 		}
@@ -185,7 +187,11 @@ func (c *Client) openPDN(ctx context.Context, cfg pdnOpenConfig) (*PDNSession, e
 			return nil, errors.Join(err, session.Close())
 		}
 	}
-	if err := session.start(ctx, cfg); err != nil {
+	startCfg := cfg
+	if cfg.LegacyMuxDataPort != 0 {
+		startCfg.IPPreference = WDSIPPreferenceDefault
+	}
+	if err := session.start(ctx, startCfg); err != nil {
 		return nil, errors.Join(err, session.Close())
 	}
 	runtime, err := session.runtimeSettings(ctx, cfg.requestedSettings)

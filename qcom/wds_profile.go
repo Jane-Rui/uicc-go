@@ -84,6 +84,49 @@ type WDSGetProfileSettingsRequest struct {
 	Profile       WDSProfileID
 }
 
+type WDSModifyProfileRequest struct {
+	ClientID      uint8
+	TransactionID uint16
+	Timeout       time.Duration
+	Profile       WDSProfileID
+	PCSCFUsingPCO bool
+}
+
+func (r WDSModifyProfileRequest) Request() Request {
+	return Request{
+		Service:       ServiceWDS,
+		ClientID:      r.ClientID,
+		TransactionID: r.TransactionID,
+		MessageID:     MessageWDSModifyProfile,
+		Timeout:       r.Timeout,
+		TLVs: tlv.TLVs{
+			tlv.Bytes(wdsTLVProfileID, []byte{byte(r.Profile.Type), r.Profile.Index}),
+			tlv.Bytes(wdsTLVPCSCFUsingPCO, []byte{boolByte(r.PCSCFUsingPCO)}),
+		},
+	}
+}
+
+type WDSSetDefaultProfileRequest struct {
+	ClientID      uint8
+	TransactionID uint16
+	Timeout       time.Duration
+	Profile       WDSProfileID
+	Family        WDSProfileFamily
+}
+
+func (r WDSSetDefaultProfileRequest) Request() Request {
+	return Request{
+		Service:       ServiceWDS,
+		ClientID:      r.ClientID,
+		TransactionID: r.TransactionID,
+		MessageID:     MessageWDSSetDefaultProfile,
+		Timeout:       r.Timeout,
+		TLVs: tlv.TLVs{
+			tlv.Bytes(wdsTLVProfileID, []byte{byte(r.Profile.Type), byte(r.Family), r.Profile.Index}),
+		},
+	}
+}
+
 func (r WDSGetProfileSettingsRequest) Request() Request {
 	return Request{Service: ServiceWDS, ClientID: r.ClientID, TransactionID: r.TransactionID, MessageID: MessageWDSGetProfileSettings, Timeout: r.Timeout, TLVs: tlv.TLVs{tlv.Bytes(wdsTLVProfileID, []byte{byte(r.Profile.Type), r.Profile.Index})}}
 }
@@ -136,6 +179,48 @@ func (c *Client) WDSProfileSettings(ctx context.Context, id WDSProfileID) (WDSPr
 		return WDSProfileSettings{}, fmt.Errorf("querying QMI WDS profile %d settings: %w", id.Index, err)
 	}
 	return settings, nil
+}
+
+// WDSModifyProfile enables P-CSCF address delivery through PCO for a stored profile.
+func (c *Client) WDSModifyProfile(ctx context.Context, id WDSProfileID, pcscfUsingPCO bool) error {
+	err := c.withServiceClient(ctx, ServiceWDS, func(clientID uint8) error {
+		req := WDSModifyProfileRequest{
+			ClientID:      clientID,
+			Timeout:       DefaultRequestTimeout,
+			Profile:       id,
+			PCSCFUsingPCO: pcscfUsingPCO,
+		}.Request()
+		resp, err := c.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+		if err != nil {
+			return err
+		}
+		return resultOK(resp)
+	})
+	if err != nil {
+		return fmt.Errorf("modify QMI WDS profile %d: %w", id.Index, err)
+	}
+	return nil
+}
+
+// WDSSetDefaultProfile selects a stored profile as the default profile in the given family.
+func (c *Client) WDSSetDefaultProfile(ctx context.Context, id WDSProfileID, family WDSProfileFamily) error {
+	err := c.withServiceClient(ctx, ServiceWDS, func(clientID uint8) error {
+		req := WDSSetDefaultProfileRequest{
+			ClientID: clientID,
+			Timeout:  DefaultRequestTimeout,
+			Profile:  id,
+			Family:   family,
+		}.Request()
+		resp, err := c.requestServiceWithTimeout(ctx, req.Service, req.ClientID, req.MessageID, req.TLVs, req.Timeout)
+		if err != nil {
+			return err
+		}
+		return resultOK(resp)
+	})
+	if err != nil {
+		return fmt.Errorf("set default QMI WDS profile %d: %w", id.Index, err)
+	}
+	return nil
 }
 
 // WDSCreateProfile creates a persistent 3GPP profile. The caller owns the

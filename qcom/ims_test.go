@@ -228,6 +228,60 @@ func TestOpenIMSPDNBindsDataPortBeforeStartingNetwork(t *testing.T) {
 	}
 }
 
+func TestOpenIMSPDNLegacyMuxUsesProfileIPFamily(t *testing.T) {
+	tests := []struct {
+		name       string
+		preference WDSIPPreference
+	}{
+		{name: "IPv4 preference ignored", preference: WDSIPPreferenceIPv4},
+		{name: "IPv6 preference ignored", preference: WDSIPPreferenceIPv6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{t: t, calls: []transportCall{
+				{resp: allocatedClientResponse(ServiceWDS, 2)},
+				{resp: successResponse(MessageWDSLegacyBindMuxDataPort)},
+				{
+					check: func(req Request) {
+						if req.MessageID != MessageWDSStartNetworkInterface {
+							t.Fatalf("MessageID = 0x%04X, want Start Network", req.MessageID)
+						}
+						if _, ok := tlv.Value(req.TLVs, 0x19); ok {
+							t.Fatal("IP family TLV unexpectedly present")
+						}
+					},
+					resp: successResponse(MessageWDSStartNetworkInterface, tlv.Uint(0x01, uint32(0x01020304))),
+				},
+				{resp: successResponse(MessageWDSGetRuntimeSettings)},
+				{resp: allocatedClientResponse(ServiceNAS, 3)},
+				{resp: successResponse(MessageNASGetSysInfo, tlv.Bytes(0x29, []byte{1}))},
+				{resp: successResponse(MessageWDSStopNetworkInterface)},
+				{resp: successResponse(MessageReleaseClientID)},
+				{resp: successResponse(MessageReleaseClientID)},
+			}}
+
+			reader, err := NewClient(transport)
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+			session, err := reader.OpenIMSPDN(context.Background(), IMSPDNConfig{
+				IPPreference:      tt.preference,
+				LegacyMuxDataPort: WDSSIOPortA2MuxRMNET0,
+			})
+			if err != nil {
+				t.Fatalf("OpenIMSPDN() error = %v", err)
+			}
+			if err := session.Close(); err != nil {
+				t.Fatalf("session.Close() error = %v", err)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatalf("reader.Close() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestOpenIMSPDNBindDataPortFailureReleasesWDSClient(t *testing.T) {
 	tests := []struct {
 		name          string

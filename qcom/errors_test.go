@@ -114,10 +114,13 @@ func TestResultError(t *testing.T) {
 
 func TestWDSStartNetworkErrorIncludesCallEndReason(t *testing.T) {
 	err := &WDSStartNetworkError{
-		Err:                     QMIErrorCallFailed,
-		CallEndReason:           WDSCallEndReasonGenericUnspecified,
-		HasCallEndReason:        true,
-		VerboseCallEndReason:    WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonTypeInternal, Reason: 241},
+		Err:              QMIErrorCallFailed,
+		CallEndReason:    WDSCallEndReasonGenericUnspecified,
+		HasCallEndReason: true,
+		VerboseCallEndReason: WDSVerboseCallEndReason{
+			Type:   WDSVerboseCallEndReasonTypeInternal,
+			Reason: WDSVerboseCallEndReasonInternalInterfaceInUseConfigMatch,
+		},
 		HasVerboseCallEndReason: true,
 	}
 
@@ -128,5 +131,120 @@ func TestWDSStartNetworkErrorIncludesCallEndReason(t *testing.T) {
 	want := "start WDS network: Call failed: call end reason generic-unspecified (1): verbose call end reason [internal] interface-in-use-config-match (2,241)"
 	if got := err.Error(); got != want {
 		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestWDSStartNetworkErrorIPFamilyRestriction(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason WDSVerboseCallEndReason
+		has    bool
+		target error
+		want   bool
+	}{
+		{
+			name:   "3GPP IPv4 only",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv4OnlyAllowed},
+			has:    true,
+			target: ErrWDSIPv4Only,
+			want:   true,
+		},
+		{
+			name:   "3GPP IPv6 only",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv6OnlyAllowed},
+			has:    true,
+			target: ErrWDSIPv6Only,
+			want:   true,
+		},
+		{
+			name:   "different target",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv4OnlyAllowed},
+			has:    true,
+			target: ErrWDSIPv6Only,
+		},
+		{
+			name:   "same value in internal namespace",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonTypeInternal, Reason: WDSVerboseCallEndReason3GPPIPv4OnlyAllowed},
+			has:    true,
+			target: ErrWDSIPv4Only,
+		},
+		{
+			name:   "missing verbose reason",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv4OnlyAllowed},
+			target: ErrWDSIPv4Only,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &WDSStartNetworkError{
+				Err:                     QMIErrorCallFailed,
+				VerboseCallEndReason:    tt.reason,
+				HasVerboseCallEndReason: tt.has,
+			}
+			if got := errors.Is(err, tt.target); got != tt.want {
+				t.Fatalf("errors.Is() = %t, want %t", got, tt.want)
+			}
+			if !errors.Is(err, QMIErrorCallFailed) {
+				t.Fatal("WDSStartNetworkError should keep unwrapping the QMI error")
+			}
+		})
+	}
+}
+
+func TestWDSVerboseCallEndReasonString(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason WDSVerboseCallEndReason
+		want   string
+	}{
+		{
+			name:   "3GPP IPv4 only",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv4OnlyAllowed},
+			want:   "pdn-type-ipv4-only-allowed",
+		},
+		{
+			name: "internal namespace",
+			reason: WDSVerboseCallEndReason{
+				Type:   WDSVerboseCallEndReasonTypeInternal,
+				Reason: WDSVerboseCallEndReasonInternalInterfaceInUseConfigMatch,
+			},
+			want: "interface-in-use-config-match",
+		},
+		{
+			name:   "unknown",
+			reason: WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonTypePPP, Reason: 50},
+			want:   "reason-50",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.reason.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWDSIPPreferenceString(t *testing.T) {
+	tests := []struct {
+		name       string
+		preference WDSIPPreference
+		want       string
+	}{
+		{name: "default", preference: WDSIPPreferenceDefault, want: "default"},
+		{name: "IPv4", preference: WDSIPPreferenceIPv4, want: "ipv4"},
+		{name: "IPv6", preference: WDSIPPreferenceIPv6, want: "ipv6"},
+		{name: "unspecified", preference: WDSIPPreferenceUnspecified, want: "unspecified"},
+		{name: "unknown", preference: WDSIPPreference(9), want: "preference-9"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.preference.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

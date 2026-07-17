@@ -13,6 +13,12 @@ var (
 	errShortResultTLV = errors.New("result TLV too short")
 )
 
+// ErrWDSIPv4Only reports that the network restricted a dual-stack WDS call to IPv4.
+var ErrWDSIPv4Only = errors.New("WDS network allows IPv4 only")
+
+// ErrWDSIPv6Only reports that the network restricted a dual-stack WDS call to IPv6.
+var ErrWDSIPv6Only = errors.New("WDS network allows IPv6 only")
+
 // QMIError represents QMI protocol errors as defined in libqmi
 // These correspond to the "Error" field in QMI Result TLVs
 type QMIError uint16
@@ -335,6 +341,21 @@ func (e *WDSStartNetworkError) Unwrap() error {
 	return e.Err
 }
 
+// Is reports network address-family restrictions while preserving Err through Unwrap.
+func (e *WDSStartNetworkError) Is(target error) bool {
+	if e == nil || !e.HasVerboseCallEndReason || e.VerboseCallEndReason.Type != WDSVerboseCallEndReasonType3GPP {
+		return false
+	}
+	switch target {
+	case ErrWDSIPv4Only:
+		return e.VerboseCallEndReason.Reason == WDSVerboseCallEndReason3GPPIPv4OnlyAllowed
+	case ErrWDSIPv6Only:
+		return e.VerboseCallEndReason.Reason == WDSVerboseCallEndReason3GPPIPv6OnlyAllowed
+	default:
+		return false
+	}
+}
+
 func (r WDSCallEndReason) String() string {
 	if text, ok := wdsCallEndReasonText[r]; ok {
 		return text
@@ -350,10 +371,8 @@ func (t WDSVerboseCallEndReasonType) String() string {
 }
 
 func (r WDSVerboseCallEndReason) String() string {
-	if r.Type == WDSVerboseCallEndReasonTypeInternal {
-		if text, ok := wdsVerboseInternalReasonText[r.Reason]; ok {
-			return text
-		}
+	if text, ok := wdsVerboseCallEndReasonText[r]; ok {
+		return text
 	}
 	return fmt.Sprintf("reason-%d", r.Reason)
 }
@@ -372,12 +391,48 @@ var wdsVerboseCallEndReasonTypeText = map[WDSVerboseCallEndReasonType]string{
 	WDSVerboseCallEndReasonTypeIPv6:     "ipv6",
 }
 
-var wdsVerboseInternalReasonText = map[int16]string{
-	208: "pdn-ipv4-call-disallowed",
-	210: "pdn-ipv6-call-disallowed",
-	236: "call-already-present",
-	237: "interface-in-use",
-	241: "interface-in-use-config-match",
+var wdsVerboseCallEndReasonText = map[WDSVerboseCallEndReason]string{
+	{Type: WDSVerboseCallEndReasonTypeInternal, Reason: WDSVerboseCallEndReasonInternalPDNIPv4CallDisallowed}:     "pdn-ipv4-call-disallowed",
+	{Type: WDSVerboseCallEndReasonTypeInternal, Reason: WDSVerboseCallEndReasonInternalPDNIPv6CallDisallowed}:     "pdn-ipv6-call-disallowed",
+	{Type: WDSVerboseCallEndReasonTypeInternal, Reason: WDSVerboseCallEndReasonInternalCallAlreadyPresent}:        "call-already-present",
+	{Type: WDSVerboseCallEndReasonTypeInternal, Reason: WDSVerboseCallEndReasonInternalInterfaceInUse}:            "interface-in-use",
+	{Type: WDSVerboseCallEndReasonTypeInternal, Reason: WDSVerboseCallEndReasonInternalInterfaceInUseConfigMatch}: "interface-in-use-config-match",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPOperatorDeterminedBarring}:         "operator-determined-barring",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPLLCSNDCPFailure}:                   "llc-sndcp-failure",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPInsufficientResources}:             "insufficient-resources",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPUnknownAPN}:                        "unknown-apn",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPUnknownPDP}:                        "unknown-pdp",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPAuthenticationFailed}:              "authentication-failed",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPGGSNReject}:                        "ggsn-reject",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPActivationReject}:                  "activation-reject",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPOptionNotSupported}:                "option-not-supported",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPOptionUnsubscribed}:                "option-unsubscribed",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPOptionTemporarilyOutOfOrder}:       "option-temporarily-out-of-order",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPNSAPIAlreadyUsed}:                  "nsapi-already-used",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPRegularDeactivation}:               "regular-deactivation",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPQoSNotAccepted}:                    "qos-not-accepted",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPNetworkFailure}:                    "network-failure",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPUMTSReactivationRequested}:         "umts-reactivation-requested",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPFeatureNotSupported}:               "feature-not-supported",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPTFTSemanticError}:                  "tft-semantic-error",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPTFTSyntaxError}:                    "tft-syntax-error",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPUnknownPDPContext}:                 "unknown-pdp-context",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPFilterSemanticError}:               "filter-semantic-error",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPFilterSyntaxError}:                 "filter-syntax-error",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPPDPWithoutActiveTFT}:               "pdp-without-active-tft",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv4OnlyAllowed}:                   "pdn-type-ipv4-only-allowed",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPIPv6OnlyAllowed}:                   "pdn-type-ipv6-only-allowed",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPSingleAddressBearerOnly}:           "single-address-bearer-only",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPInvalidTransactionID}:              "invalid-transaction-id",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPMessageIncorrectSemantic}:          "message-incorrect-semantic",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPInvalidMandatoryInformation}:       "invalid-mandatory-information",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPMessageTypeUnsupported}:            "message-type-unsupported",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPMessageTypeIncompatibleState}:      "message-type-incompatible-state",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPUnknownInformationElement}:         "unknown-information-element",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPConditionalInformationError}:       "conditional-information-error",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPMessageProtocolStateMismatch}:      "message-protocol-state-mismatch",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPProtocolError}:                     "protocol-error",
+	{Type: WDSVerboseCallEndReasonType3GPP, Reason: WDSVerboseCallEndReason3GPPAPNTypeConflict}:                   "apn-type-conflict",
 }
 
 func ResultError(tlvs tlv.TLVs) error {

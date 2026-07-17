@@ -409,8 +409,11 @@ func TestWDSStartNetworkInterfaceResponseUnmarshalTLVs(t *testing.T) {
 				tlv.Bytes(0x10, uint16ValueForTest(uint16(WDSCallEndReasonGenericUnspecified))),
 				tlv.Bytes(0x11, verboseCallEndReasonForTest(WDSVerboseCallEndReasonTypeInternal, 241)),
 			},
-			wantCallEnd:    WDSCallEndReasonGenericUnspecified,
-			wantVerbose:    WDSVerboseCallEndReason{Type: WDSVerboseCallEndReasonTypeInternal, Reason: 241},
+			wantCallEnd: WDSCallEndReasonGenericUnspecified,
+			wantVerbose: WDSVerboseCallEndReason{
+				Type:   WDSVerboseCallEndReasonTypeInternal,
+				Reason: WDSVerboseCallEndReasonInternalInterfaceInUseConfigMatch,
+			},
 			wantHasCallEnd: true,
 			wantHasVerbose: true,
 		},

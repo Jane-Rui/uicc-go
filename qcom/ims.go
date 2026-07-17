@@ -100,7 +100,10 @@ func (c *Client) OpenPDN(ctx context.Context, cfg PDNConfig) (*PDNSession, error
 	return session, nil
 }
 
-// OpenIMSPDN starts an IMS PDN and reads the matching NAS voice state.
+// OpenIMSPDN starts an IMS PDN and reads the matching NAS voice state. When
+// IPPreference is WDSIPPreferenceUnspecified, a 3GPP IPv4-only or IPv6-only
+// response starts one new WDS call with that family. Info reports the family
+// negotiated by the successful call.
 func (c *Client) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSession, error) {
 	if c == nil {
 		return nil, errors.New("opening IMS PDN: client is nil")
@@ -110,7 +113,7 @@ func (c *Client) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSessi
 		cfg.APN = DefaultIMSPDNAPN
 	}
 	callType := WDSCallTypeEmbedded
-	pdn, err := c.openPDN(ctx, pdnOpenConfig{
+	pdnCfg := pdnOpenConfig{
 		PDNConfig: PDNConfig{
 			APN:               cfg.APN,
 			IPPreference:      cfg.IPPreference,
@@ -123,7 +126,21 @@ func (c *Client) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSessi
 		technology: WDSTechnologyPreference3GPP,
 		requestedSettings: WDSRuntimeRequestedIMSSettings |
 			WDSRuntimeRequestedNetworkSettings,
-	})
+	}
+	pdn, err := c.openPDN(ctx, pdnCfg)
+	if err != nil && cfg.IPPreference == WDSIPPreferenceUnspecified && cfg.LegacyMuxDataPort == 0 {
+		if restricted, ok := wdsRestrictedIPPreference(err); ok {
+			initialErr := err
+			pdnCfg.IPPreference = restricted
+			pdn, err = c.openPDN(ctx, pdnCfg)
+			if err != nil {
+				return nil, errors.Join(
+					fmt.Errorf("opening IMS PDN: %w", initialErr),
+					fmt.Errorf("opening IMS PDN with network IP family %s: %w", restricted, err),
+				)
+			}
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("opening IMS PDN: %w", err)
 	}
@@ -147,6 +164,17 @@ func (c *Client) OpenIMSPDN(ctx context.Context, cfg IMSPDNConfig) (*IMSPDNSessi
 		VoPSSupported: sys.VoPSSupported,
 	}
 	return session, nil
+}
+
+func wdsRestrictedIPPreference(err error) (WDSIPPreference, bool) {
+	switch {
+	case errors.Is(err, ErrWDSIPv4Only):
+		return WDSIPPreferenceIPv4, true
+	case errors.Is(err, ErrWDSIPv6Only):
+		return WDSIPPreferenceIPv6, true
+	default:
+		return 0, false
+	}
 }
 
 func (c *Client) openPDN(ctx context.Context, cfg pdnOpenConfig) (*PDNSession, error) {

@@ -2,6 +2,7 @@ package qcom
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -144,6 +145,21 @@ const (
 	WDSIPPreferenceIPv6        WDSIPPreference = 6
 	WDSIPPreferenceUnspecified WDSIPPreference = 8
 )
+
+func (p WDSIPPreference) String() string {
+	switch p {
+	case WDSIPPreferenceDefault:
+		return "default"
+	case WDSIPPreferenceIPv4:
+		return "ipv4"
+	case WDSIPPreferenceIPv6:
+		return "ipv6"
+	case WDSIPPreferenceUnspecified:
+		return "unspecified"
+	default:
+		return fmt.Sprintf("preference-%d", p)
+	}
+}
 
 // WDSCallType identifies the origin of a WDS packet-data call.
 type WDSCallType uint8
@@ -376,6 +392,55 @@ const (
 	WDSVerboseCallEndReasonTypePPP      WDSVerboseCallEndReasonType = 7
 	WDSVerboseCallEndReasonTypeEHRPD    WDSVerboseCallEndReasonType = 8
 	WDSVerboseCallEndReasonTypeIPv6     WDSVerboseCallEndReasonType = 9
+)
+
+// Internal verbose call-end reasons returned in the WDS type-2 namespace.
+const (
+	WDSVerboseCallEndReasonInternalPDNIPv4CallDisallowed     int16 = 208
+	WDSVerboseCallEndReasonInternalPDNIPv6CallDisallowed     int16 = 210
+	WDSVerboseCallEndReasonInternalCallAlreadyPresent        int16 = 236
+	WDSVerboseCallEndReasonInternalInterfaceInUse            int16 = 237
+	WDSVerboseCallEndReasonInternalInterfaceInUseConfigMatch int16 = 241
+)
+
+// 3GPP verbose call-end reasons returned in the WDS type-6 namespace.
+const (
+	WDSVerboseCallEndReason3GPPOperatorDeterminedBarring    int16 = 8
+	WDSVerboseCallEndReason3GPPLLCSNDCPFailure              int16 = 25
+	WDSVerboseCallEndReason3GPPInsufficientResources        int16 = 26
+	WDSVerboseCallEndReason3GPPUnknownAPN                   int16 = 27
+	WDSVerboseCallEndReason3GPPUnknownPDP                   int16 = 28
+	WDSVerboseCallEndReason3GPPAuthenticationFailed         int16 = 29
+	WDSVerboseCallEndReason3GPPGGSNReject                   int16 = 30
+	WDSVerboseCallEndReason3GPPActivationReject             int16 = 31
+	WDSVerboseCallEndReason3GPPOptionNotSupported           int16 = 32
+	WDSVerboseCallEndReason3GPPOptionUnsubscribed           int16 = 33
+	WDSVerboseCallEndReason3GPPOptionTemporarilyOutOfOrder  int16 = 34
+	WDSVerboseCallEndReason3GPPNSAPIAlreadyUsed             int16 = 35
+	WDSVerboseCallEndReason3GPPRegularDeactivation          int16 = 36
+	WDSVerboseCallEndReason3GPPQoSNotAccepted               int16 = 37
+	WDSVerboseCallEndReason3GPPNetworkFailure               int16 = 38
+	WDSVerboseCallEndReason3GPPUMTSReactivationRequested    int16 = 39
+	WDSVerboseCallEndReason3GPPFeatureNotSupported          int16 = 40
+	WDSVerboseCallEndReason3GPPTFTSemanticError             int16 = 41
+	WDSVerboseCallEndReason3GPPTFTSyntaxError               int16 = 42
+	WDSVerboseCallEndReason3GPPUnknownPDPContext            int16 = 43
+	WDSVerboseCallEndReason3GPPFilterSemanticError          int16 = 44
+	WDSVerboseCallEndReason3GPPFilterSyntaxError            int16 = 45
+	WDSVerboseCallEndReason3GPPPDPWithoutActiveTFT          int16 = 46
+	WDSVerboseCallEndReason3GPPIPv4OnlyAllowed              int16 = 50
+	WDSVerboseCallEndReason3GPPIPv6OnlyAllowed              int16 = 51
+	WDSVerboseCallEndReason3GPPSingleAddressBearerOnly      int16 = 52
+	WDSVerboseCallEndReason3GPPInvalidTransactionID         int16 = 81
+	WDSVerboseCallEndReason3GPPMessageIncorrectSemantic     int16 = 95
+	WDSVerboseCallEndReason3GPPInvalidMandatoryInformation  int16 = 96
+	WDSVerboseCallEndReason3GPPMessageTypeUnsupported       int16 = 97
+	WDSVerboseCallEndReason3GPPMessageTypeIncompatibleState int16 = 98
+	WDSVerboseCallEndReason3GPPUnknownInformationElement    int16 = 99
+	WDSVerboseCallEndReason3GPPConditionalInformationError  int16 = 100
+	WDSVerboseCallEndReason3GPPMessageProtocolStateMismatch int16 = 101
+	WDSVerboseCallEndReason3GPPProtocolError                int16 = 111
+	WDSVerboseCallEndReason3GPPAPNTypeConflict              int16 = 112
 )
 
 // WDSVerboseCallEndReason is the structured WDS call failure reason.

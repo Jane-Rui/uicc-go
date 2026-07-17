@@ -73,6 +73,256 @@ func TestOpenIMSPDNNormalizesAPN(t *testing.T) {
 	}
 }
 
+func TestOpenIMSPDNNegotiatesNetworkIPFamilyRestriction(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     int16
+		preference WDSIPPreference
+		family     WDSIPFamily
+	}{
+		{
+			name:       "IPv4 only",
+			reason:     WDSVerboseCallEndReason3GPPIPv4OnlyAllowed,
+			preference: WDSIPPreferenceIPv4,
+			family:     WDSIPFamilyIPv4,
+		},
+		{
+			name:       "IPv6 only",
+			reason:     WDSVerboseCallEndReason3GPPIPv6OnlyAllowed,
+			preference: WDSIPPreferenceIPv6,
+			family:     WDSIPFamilyIPv6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{t: t, calls: []transportCall{
+				{resp: allocatedClientResponse(ServiceWDS, 2)},
+				{resp: successResponse(MessageWDSBindMuxDataPort)},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x19, []byte{byte(WDSIPPreferenceUnspecified)})
+					},
+					resp: errorResponse(
+						MessageWDSStartNetworkInterface,
+						QMIErrorCallFailed,
+						tlv.Bytes(0x11, verboseCallEndReasonForTest(WDSVerboseCallEndReasonType3GPP, tt.reason)),
+					),
+				},
+				{resp: successResponse(MessageReleaseClientID)},
+				{resp: allocatedClientResponse(ServiceWDS, 3)},
+				{
+					check: func(req Request) {
+						if req.MessageID != MessageWDSSetClientIPFamily {
+							t.Fatalf("MessageID = 0x%04X, want Set Client IP Family", req.MessageID)
+						}
+						assertTLV(t, req.TLVs, 0x01, []byte{byte(tt.family)})
+					},
+					resp: successResponse(MessageWDSSetClientIPFamily),
+				},
+				{resp: successResponse(MessageWDSBindMuxDataPort)},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x19, []byte{byte(tt.preference)})
+					},
+					resp: successResponse(MessageWDSStartNetworkInterface, tlv.Uint(0x01, uint32(0x01020304))),
+				},
+				{resp: successResponse(MessageWDSGetRuntimeSettings, tlv.Bytes(0x2B, []byte{byte(tt.family)}))},
+				{resp: allocatedClientResponse(ServiceNAS, 4)},
+				{resp: successResponse(MessageNASGetSysInfo, tlv.Bytes(0x29, []byte{1}))},
+				{resp: successResponse(MessageWDSStopNetworkInterface)},
+				{resp: successResponse(MessageReleaseClientID)},
+				{resp: successResponse(MessageReleaseClientID)},
+			}}
+
+			reader, err := NewClient(transport)
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+			session, err := reader.OpenIMSPDN(context.Background(), IMSPDNConfig{
+				APN:          "ims",
+				IPPreference: WDSIPPreferenceUnspecified,
+				MuxDataPort:  &WDSMuxDataPort{MuxID: 2},
+			})
+			if err != nil {
+				t.Fatalf("OpenIMSPDN() error = %v", err)
+			}
+			if got := session.Info().IPFamily; got != tt.family {
+				t.Fatalf("IPFamily = %d, want %d", got, tt.family)
+			}
+			if err := session.Close(); err != nil {
+				t.Fatalf("session.Close() error = %v", err)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatalf("reader.Close() error = %v", err)
+			}
+			if got := transport.callCount(); got != len(transport.calls) {
+				t.Fatalf("Do() calls = %d, want %d", got, len(transport.calls))
+			}
+		})
+	}
+}
+
+func TestOpenIMSPDNKeepsExplicitIPPreference(t *testing.T) {
+	tests := []struct {
+		name        string
+		preference  WDSIPPreference
+		family      WDSIPFamily
+		reason      int16
+		restriction error
+	}{
+		{
+			name:        "IPv4",
+			preference:  WDSIPPreferenceIPv4,
+			family:      WDSIPFamilyIPv4,
+			reason:      WDSVerboseCallEndReason3GPPIPv6OnlyAllowed,
+			restriction: ErrWDSIPv6Only,
+		},
+		{
+			name:        "IPv6",
+			preference:  WDSIPPreferenceIPv6,
+			family:      WDSIPFamilyIPv6,
+			reason:      WDSVerboseCallEndReason3GPPIPv4OnlyAllowed,
+			restriction: ErrWDSIPv4Only,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{t: t, calls: []transportCall{
+				{resp: allocatedClientResponse(ServiceWDS, 2)},
+				{
+					check: func(req Request) {
+						if req.MessageID != MessageWDSSetClientIPFamily {
+							t.Fatalf("MessageID = 0x%04X, want Set Client IP Family", req.MessageID)
+						}
+						assertTLV(t, req.TLVs, 0x01, []byte{byte(tt.family)})
+					},
+					resp: successResponse(MessageWDSSetClientIPFamily),
+				},
+				{resp: successResponse(MessageWDSBindMuxDataPort)},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x19, []byte{byte(tt.preference)})
+					},
+					resp: errorResponse(
+						MessageWDSStartNetworkInterface,
+						QMIErrorCallFailed,
+						tlv.Bytes(0x11, verboseCallEndReasonForTest(WDSVerboseCallEndReasonType3GPP, tt.reason)),
+					),
+				},
+				{resp: successResponse(MessageReleaseClientID)},
+			}}
+
+			reader, err := NewClient(transport)
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+			_, err = reader.OpenIMSPDN(context.Background(), IMSPDNConfig{
+				IPPreference: tt.preference,
+				MuxDataPort:  &WDSMuxDataPort{MuxID: 2},
+			})
+			if !errors.Is(err, tt.restriction) {
+				t.Fatalf("OpenIMSPDN() error = %v, want %v", err, tt.restriction)
+			}
+			if got := transport.callCount(); got != len(transport.calls) {
+				t.Fatalf("Do() calls = %d, want %d", got, len(transport.calls))
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatalf("reader.Close() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestOpenIMSPDNReleasesBothWDSClientsWhenNegotiationFails(t *testing.T) {
+	tests := []struct {
+		name        string
+		reason      int16
+		preference  WDSIPPreference
+		family      WDSIPFamily
+		restriction error
+	}{
+		{
+			name:        "IPv4 only",
+			reason:      WDSVerboseCallEndReason3GPPIPv4OnlyAllowed,
+			preference:  WDSIPPreferenceIPv4,
+			family:      WDSIPFamilyIPv4,
+			restriction: ErrWDSIPv4Only,
+		},
+		{
+			name:        "IPv6 only",
+			reason:      WDSVerboseCallEndReason3GPPIPv6OnlyAllowed,
+			preference:  WDSIPPreferenceIPv6,
+			family:      WDSIPFamilyIPv6,
+			restriction: ErrWDSIPv6Only,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeTransport{t: t, calls: []transportCall{
+				{resp: allocatedClientResponse(ServiceWDS, 2)},
+				{resp: successResponse(MessageWDSBindMuxDataPort)},
+				{
+					resp: errorResponse(
+						MessageWDSStartNetworkInterface,
+						QMIErrorCallFailed,
+						tlv.Bytes(0x11, verboseCallEndReasonForTest(WDSVerboseCallEndReasonType3GPP, tt.reason)),
+					),
+				},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x01, []byte{byte(ServiceWDS), 2})
+					},
+					resp: successResponse(MessageReleaseClientID),
+				},
+				{resp: allocatedClientResponse(ServiceWDS, 3)},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x01, []byte{byte(tt.family)})
+					},
+					resp: successResponse(MessageWDSSetClientIPFamily),
+				},
+				{resp: successResponse(MessageWDSBindMuxDataPort)},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x19, []byte{byte(tt.preference)})
+					},
+					resp: errorResponse(MessageWDSStartNetworkInterface, QMIErrorInternal),
+				},
+				{
+					check: func(req Request) {
+						assertTLV(t, req.TLVs, 0x01, []byte{byte(ServiceWDS), 3})
+					},
+					resp: successResponse(MessageReleaseClientID),
+				},
+			}}
+
+			reader, err := NewClient(transport)
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+			_, err = reader.OpenIMSPDN(context.Background(), IMSPDNConfig{
+				IPPreference: WDSIPPreferenceUnspecified,
+				MuxDataPort:  &WDSMuxDataPort{MuxID: 2},
+			})
+			if !errors.Is(err, tt.restriction) {
+				t.Fatalf("OpenIMSPDN() error = %v, want %v", err, tt.restriction)
+			}
+			if !errors.Is(err, QMIErrorInternal) {
+				t.Fatalf("OpenIMSPDN() error = %v, want %v", err, QMIErrorInternal)
+			}
+			if got := transport.callCount(); got != len(transport.calls) {
+				t.Fatalf("Do() calls = %d, want %d", got, len(transport.calls))
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatalf("reader.Close() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestOpenPDNUsesOnlyWDSAndOmitsOptionalDefaults(t *testing.T) {
 	tests := []struct {
 		name string
